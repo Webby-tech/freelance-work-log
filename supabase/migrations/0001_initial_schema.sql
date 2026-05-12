@@ -1,0 +1,138 @@
+-- Actor Worklog — Initial Schema
+-- Run against your Supabase project via the SQL editor or supabase db push
+
+-- Agents table (referenced by clients, so create first)
+CREATE TABLE IF NOT EXISTS agents (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name            TEXT NOT NULL,
+  address         TEXT,
+  email           TEXT,
+  commission_rate NUMERIC(5,4) DEFAULT 0.125,
+  vat_registered  BOOLEAN DEFAULT false,
+  deleted_at      TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ DEFAULT now()
+);
+
+-- Clients table
+CREATE TABLE IF NOT EXISTS clients (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name       TEXT NOT NULL,
+  address    TEXT,
+  email      TEXT,
+  type       TEXT NOT NULL CHECK (type IN ('standard', 'payroll')),
+  agent_id   UUID REFERENCES agents(id),
+  deleted_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Invoices table (referenced by work_entries)
+CREATE TABLE IF NOT EXISTS invoices (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  invoice_number  TEXT NOT NULL UNIQUE,
+  client_id       UUID REFERENCES clients(id),
+  agent_id        UUID REFERENCES agents(id),
+  type            TEXT NOT NULL CHECK (type IN ('client', 'agent_commission')),
+  period_start    DATE NOT NULL,
+  period_end      DATE NOT NULL,
+  issued_date     DATE NOT NULL DEFAULT CURRENT_DATE,
+  due_date        DATE,
+  status          TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'sent', 'paid', 'overdue', 'voided')),
+  subtotal        NUMERIC(10,2) NOT NULL,
+  commission_amt  NUMERIC(10,2),
+  vat_amount      NUMERIC(10,2) DEFAULT 0,
+  total           NUMERIC(10,2) NOT NULL,
+  notes           TEXT,
+  pdf_url         TEXT,
+  created_at      TIMESTAMPTZ DEFAULT now(),
+  updated_at      TIMESTAMPTZ DEFAULT now()
+);
+
+-- Work entries table
+CREATE TABLE IF NOT EXISTS work_entries (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id             UUID NOT NULL REFERENCES clients(id),
+  date                  DATE NOT NULL,
+  end_date              DATE,
+  location_name         TEXT NOT NULL,
+  location_postcode     TEXT,
+  location_lat          NUMERIC(9,6),
+  location_lng          NUMERIC(9,6),
+  details               TEXT,
+  flat_fee              NUMERIC(10,2) NOT NULL DEFAULT 0,
+
+  use_home_as_origin    BOOLEAN DEFAULT true,
+  override_origin_name  TEXT,
+  override_origin_pc    TEXT,
+  override_origin_lat   NUMERIC(9,6),
+  override_origin_lng   NUMERIC(9,6),
+  calculated_miles_raw  NUMERIC(8,2),
+  return_miles          INTEGER,
+  mileage_rate          NUMERIC(6,4) DEFAULT 0.45,
+  travel_expenses       NUMERIC(10,2) DEFAULT 0,
+
+  invoice_id            UUID REFERENCES invoices(id),
+  notes                 TEXT,
+
+  created_at            TIMESTAMPTZ DEFAULT now(),
+  updated_at            TIMESTAMPTZ DEFAULT now()
+);
+
+-- User settings table (single row per user)
+CREATE TABLE IF NOT EXISTS user_settings (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id           UUID,
+  home_postcode     TEXT NOT NULL DEFAULT 'SW1A 1AA',
+  home_lat          NUMERIC(9,6),
+  home_lng          NUMERIC(9,6),
+  legal_name        TEXT,
+  trading_name      TEXT,
+  address           TEXT,
+  email             TEXT,
+  phone             TEXT,
+  utr_number        TEXT,
+  vat_number        TEXT,
+  vat_registered    BOOLEAN DEFAULT false,
+  bank_name         TEXT,
+  bank_sort_code    TEXT,
+  bank_account      TEXT,
+  default_mileage_rate NUMERIC(6,4) DEFAULT 0.45,
+  invoice_prefix    TEXT DEFAULT 'INV',
+  tax_year_start    TEXT DEFAULT '04-06',
+
+  personal_allowance_exhausted  BOOLEAN DEFAULT false,
+  use_flat_tax_rate             BOOLEAN DEFAULT false,
+  flat_tax_rate_override        NUMERIC(5,4) DEFAULT 0.20,
+  prior_year_tax_bill           NUMERIC(10,2),
+  poa_jan_paid                  NUMERIC(10,2) DEFAULT 0,
+  poa_jul_paid                  NUMERIC(10,2) DEFAULT 0,
+
+  created_at        TIMESTAMPTZ DEFAULT now(),
+  updated_at        TIMESTAMPTZ DEFAULT now()
+);
+
+-- Updated_at triggers
+CREATE OR REPLACE FUNCTION update_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS clients_updated_at      ON clients;
+DROP TRIGGER IF EXISTS invoices_updated_at     ON invoices;
+DROP TRIGGER IF EXISTS work_entries_updated_at ON work_entries;
+DROP TRIGGER IF EXISTS user_settings_updated_at ON user_settings;
+
+CREATE TRIGGER clients_updated_at BEFORE UPDATE ON clients
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE TRIGGER invoices_updated_at BEFORE UPDATE ON invoices
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE TRIGGER work_entries_updated_at BEFORE UPDATE ON work_entries
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE TRIGGER user_settings_updated_at BEFORE UPDATE ON user_settings
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
