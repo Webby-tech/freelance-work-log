@@ -138,7 +138,7 @@ export function EntryTable({ entries, clients, taxYears, selectedYear }: Props) 
                         </span>
                       )}
                       {travel > 0 && (
-                        <span>Travel {formatCurrency(travel)}{e.travelExpensesDescription ? ` · ${e.travelExpensesDescription}` : ''}</span>
+                        <span>Travel {formatCurrency(travel)}</span>
                       )}
                     </div>
                   </div>
