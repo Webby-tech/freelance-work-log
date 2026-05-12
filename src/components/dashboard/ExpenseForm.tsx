@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { createExpenseAction, deleteExpenseAction } from '@/actions/expense.actions'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, formatDate } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -97,7 +97,7 @@ export function ExpenseCard({ expenses, ytdTotal, recentItems }: Props) {
             {expenses.slice(0, showAll ? undefined : 3).map(e => (
               <div key={e.id} className="flex items-center justify-between text-xs text-slate-600">
                 <span className="truncate flex-1 mr-2">
-                  <span className="text-slate-400">{e.date}</span>
+                  <span className="text-slate-400">{formatDate(e.date)}</span>
                   {' '}{e.description}
                   <span className="text-slate-400 ml-1">· {e.category}</span>
                 </span>
