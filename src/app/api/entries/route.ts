@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/db/index'
-import { fromDb } from '@/lib/db/mappers'
+import { and, eq, gte, isNull, lte } from 'drizzle-orm'
+import { db } from '@/lib/db/index'
+import { workEntries } from '@/lib/db/schema'
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl
@@ -12,15 +13,21 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Missing params' }, { status: 400 })
   }
 
-  const { data, error } = await supabaseAdmin
-    .from('work_entries')
-    .select('*')
-    .eq('client_id', clientId)
-    .is('invoice_id', null)
-    .gte('date', startDate)
-    .lte('date', endDate)
-    .order('date')
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json((data as unknown[]).map(row => fromDb(row)))
+  try {
+    const entries = await db
+      .select()
+      .from(workEntries)
+      .where(
+        and(
+          eq(workEntries.clientId, clientId),
+          isNull(workEntries.invoiceId),
+          gte(workEntries.date, startDate),
+          lte(workEntries.date, endDate)
+        )
+      )
+      .orderBy(workEntries.date)
+    return NextResponse.json(entries)
+  } catch (error) {
+    return NextResponse.json({ error: (error as Error).message }, { status: 500 })
+  }
 }

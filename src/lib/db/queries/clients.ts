@@ -1,118 +1,78 @@
-import { supabaseAdmin } from '../index'
+import { and, count, eq, isNull } from 'drizzle-orm'
+import { db } from '../index'
+import { agents, clients, workEntries } from '../schema'
 import type { Client, Agent, NewClient, NewAgent } from '../schema'
-import { fromDb, toDb } from '../mappers'
 
 export type ClientWithAgent = Client & { agent: Agent | null }
 
 // ─── Agents ──────────────────────────────────────────────────────────────────
 
 export async function getAgents(): Promise<Agent[]> {
-  const { data, error } = await supabaseAdmin
-    .from('agents')
-    .select('*')
-    .is('deleted_at', null)
-    .order('name')
-  if (error) throw error
-  return (data as unknown[]).map(row => fromDb<Agent>(row))
+  return db.select().from(agents).where(isNull(agents.deletedAt)).orderBy(agents.name)
 }
 
 export async function getAgent(id: string): Promise<Agent | null> {
-  const { data, error } = await supabaseAdmin
-    .from('agents')
-    .select('*')
-    .eq('id', id)
-    .is('deleted_at', null)
-    .single()
-  if (error) return null
-  return fromDb<Agent>(data)
+  const rows = await db
+    .select()
+    .from(agents)
+    .where(and(eq(agents.id, id), isNull(agents.deletedAt)))
+    .limit(1)
+  return rows[0] ?? null
 }
 
 export async function createAgent(values: Omit<NewAgent, 'id' | 'createdAt'>): Promise<Agent> {
-  const { data, error } = await supabaseAdmin
-    .from('agents')
-    .insert(toDb(values))
-    .select()
-    .single()
-  if (error) throw error
-  return fromDb<Agent>(data)
+  const [agent] = await db.insert(agents).values(values).returning()
+  return agent
 }
 
 export async function updateAgent(id: string, values: Partial<Agent>): Promise<Agent> {
-  const { data, error } = await supabaseAdmin
-    .from('agents')
-    .update(toDb(values))
-    .eq('id', id)
-    .select()
-    .single()
-  if (error) throw error
-  return fromDb<Agent>(data)
+  const [agent] = await db.update(agents).set(values).where(eq(agents.id, id)).returning()
+  return agent
 }
 
 export async function deleteAgent(id: string): Promise<void> {
-  const { error } = await supabaseAdmin
-    .from('agents')
-    .update({ deleted_at: new Date().toISOString() })
-    .eq('id', id)
-  if (error) throw error
+  await db.update(agents).set({ deletedAt: new Date() }).where(eq(agents.id, id))
 }
 
 // ─── Clients ─────────────────────────────────────────────────────────────────
 
 export async function getClients(): Promise<ClientWithAgent[]> {
-  const { data, error } = await supabaseAdmin
-    .from('clients')
-    .select('*, agent:agents(*)')
-    .is('deleted_at', null)
-    .order('name')
-  if (error) throw error
-  return (data as unknown[]).map(row => fromDb<ClientWithAgent>(row))
+  return db.query.clients.findMany({
+    where: isNull(clients.deletedAt),
+    orderBy: clients.name,
+    with: { agent: true },
+  })
 }
 
 export async function getClient(id: string): Promise<ClientWithAgent | null> {
-  const { data, error } = await supabaseAdmin
-    .from('clients')
-    .select('*, agent:agents(*)')
-    .eq('id', id)
-    .is('deleted_at', null)
-    .single()
-  if (error) return null
-  return fromDb<ClientWithAgent>(data)
+  const client = await db.query.clients.findFirst({
+    where: and(eq(clients.id, id), isNull(clients.deletedAt)),
+    with: { agent: true },
+  })
+  return client ?? null
 }
 
 export async function createClient(values: Omit<NewClient, 'id' | 'createdAt' | 'updatedAt'>): Promise<Client> {
-  const { data, error } = await supabaseAdmin
-    .from('clients')
-    .insert(toDb(values))
-    .select()
-    .single()
-  if (error) throw error
-  return fromDb<Client>(data)
+  const [client] = await db.insert(clients).values(values).returning()
+  return client
 }
 
 export async function updateClient(id: string, values: Partial<Client>): Promise<Client> {
-  const dbValues = toDb(values) as Record<string, unknown>
-  const { data, error } = await supabaseAdmin
-    .from('clients')
-    .update({ ...dbValues, updated_at: new Date().toISOString() })
-    .eq('id', id)
-    .select()
-    .single()
-  if (error) throw error
-  return fromDb<Client>(data)
+  const [client] = await db
+    .update(clients)
+    .set({ ...values, updatedAt: new Date() })
+    .where(eq(clients.id, id))
+    .returning()
+  return client
 }
 
 export async function softDeleteClient(id: string): Promise<void> {
-  const { count } = await supabaseAdmin
-    .from('work_entries')
-    .select('id', { count: 'exact', head: true })
-    .eq('client_id', id)
-    .is('invoice_id', null)
-  if (count && count > 0) {
+  const [{ value }] = await db
+    .select({ value: count() })
+    .from(workEntries)
+    .where(and(eq(workEntries.clientId, id), isNull(workEntries.invoiceId)))
+  if (value > 0) {
     throw new Error('Cannot delete client with uninvoiced entries. Invoice or reassign them first.')
   }
-  const { error } = await supabaseAdmin
-    .from('clients')
-    .update({ deleted_at: new Date().toISOString() })
-    .eq('id', id)
-  if (error) throw error
+  await db.update(clients).set({ deletedAt: new Date() }).where(eq(clients.id, id))
 }

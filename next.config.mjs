@@ -24,7 +24,7 @@ const nextConfig = {
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: blob:",
               "font-src 'self' data:",
-              "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.postcodes.io https://nominatim.openstreetmap.org https://router.project-osrm.org",
+              "connect-src 'self' https://api.postcodes.io https://nominatim.openstreetmap.org https://router.project-osrm.org",
               "worker-src 'self' blob:",
             ].join('; '),
           },

@@ -1,36 +1,24 @@
-import { supabaseAdmin } from '../index'
+import { eq } from 'drizzle-orm'
+import { db } from '../index'
+import { userSettings } from '../schema'
 import type { UserSettings } from '../schema'
-import { fromDb, toDb } from '../mappers'
 
 export async function getSettings(): Promise<UserSettings | null> {
-  const { data, error } = await supabaseAdmin
-    .from('user_settings')
-    .select('*')
-    .limit(1)
-    .single()
-  if (error) return null
-  return fromDb<UserSettings>(data)
+  const rows = await db.select().from(userSettings).limit(1)
+  return rows[0] ?? null
 }
 
 export async function upsertSettings(values: Partial<UserSettings>): Promise<UserSettings> {
   const existing = await getSettings()
-  const dbValues = toDb(values) as Record<string, unknown>
   if (existing) {
-    const { data, error } = await supabaseAdmin
-      .from('user_settings')
-      .update({ ...dbValues, updated_at: new Date().toISOString() })
-      .eq('id', existing.id)
-      .select()
-      .single()
-    if (error) throw error
-    return fromDb<UserSettings>(data)
+    const [settings] = await db
+      .update(userSettings)
+      .set({ ...values, updatedAt: new Date() })
+      .where(eq(userSettings.id, existing.id))
+      .returning()
+    return settings
   } else {
-    const { data, error } = await supabaseAdmin
-      .from('user_settings')
-      .insert(dbValues)
-      .select()
-      .single()
-    if (error) throw error
-    return fromDb<UserSettings>(data)
+    const [settings] = await db.insert(userSettings).values(values).returning()
+    return settings
   }
 }

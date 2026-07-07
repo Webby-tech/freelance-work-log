@@ -1,7 +1,8 @@
-import { supabaseAdmin } from '../index'
+import { and, desc, eq, gte, lte } from 'drizzle-orm'
+import { db } from '../index'
+import { expenses } from '../schema'
 import type { Expense, NewExpense } from '../schema'
 import { getCurrentTaxYear } from '../../tax-year'
-import { fromDb, toDb } from '../mappers'
 
 export interface RecentExpenseItem {
   description: string
@@ -11,15 +12,18 @@ export interface RecentExpenseItem {
 
 // Returns one entry per unique description — the most recently logged values.
 export async function getRecentUniqueExpenses(): Promise<RecentExpenseItem[]> {
-  const { data, error } = await supabaseAdmin
-    .from('expenses')
-    .select('description, category, amount, created_at')
-    .order('created_at', { ascending: false })
-  if (error) return []
+  const rows = await db
+    .select({
+      description: expenses.description,
+      category: expenses.category,
+      amount: expenses.amount,
+    })
+    .from(expenses)
+    .orderBy(desc(expenses.createdAt))
   const seen = new Map<string, RecentExpenseItem>()
-  for (const row of data as { description: string; category: string; amount: string; created_at: string }[]) {
+  for (const row of rows) {
     if (!seen.has(row.description)) {
-      seen.set(row.description, { description: row.description, category: row.category, amount: row.amount })
+      seen.set(row.description, row)
     }
   }
   return Array.from(seen.values()).sort((a, b) => a.description.localeCompare(b.description))
@@ -27,43 +31,39 @@ export async function getRecentUniqueExpenses(): Promise<RecentExpenseItem[]> {
 
 export async function getYtdExpenses(): Promise<Expense[]> {
   const { start, end } = getCurrentTaxYear()
-  const { data, error } = await supabaseAdmin
-    .from('expenses')
-    .select('*')
-    .gte('date', start.toISOString().split('T')[0])
-    .lte('date', end.toISOString().split('T')[0])
-    .order('date', { ascending: false })
-  if (error) return []
-  return (data as unknown[]).map(row => fromDb<Expense>(row))
+  return db
+    .select()
+    .from(expenses)
+    .where(
+      and(
+        gte(expenses.date, start.toISOString().split('T')[0]),
+        lte(expenses.date, end.toISOString().split('T')[0])
+      )
+    )
+    .orderBy(desc(expenses.date))
 }
 
 export async function getYtdExpensesTotal(): Promise<number> {
   const { start, end } = getCurrentTaxYear()
-  const { data, error } = await supabaseAdmin
-    .from('expenses')
-    .select('amount')
-    .gte('date', start.toISOString().split('T')[0])
-    .lte('date', end.toISOString().split('T')[0])
-  if (error) return 0
-  return (data as { amount: string }[]).reduce((s, e) => s + Number(e.amount), 0)
+  const rows = await db
+    .select({ amount: expenses.amount })
+    .from(expenses)
+    .where(
+      and(
+        gte(expenses.date, start.toISOString().split('T')[0]),
+        lte(expenses.date, end.toISOString().split('T')[0])
+      )
+    )
+  return rows.reduce((s, e) => s + Number(e.amount), 0)
 }
 
 export async function createExpense(
   values: Omit<NewExpense, 'id' | 'createdAt' | 'updatedAt'>
 ): Promise<Expense> {
-  const { data, error } = await supabaseAdmin
-    .from('expenses')
-    .insert(toDb(values))
-    .select()
-    .single()
-  if (error) throw new Error(error.message)
-  return fromDb<Expense>(data)
+  const [expense] = await db.insert(expenses).values(values).returning()
+  return expense
 }
 
 export async function deleteExpense(id: string): Promise<void> {
-  const { error } = await supabaseAdmin
-    .from('expenses')
-    .delete()
-    .eq('id', id)
-  if (error) throw new Error(error.message)
+  await db.delete(expenses).where(eq(expenses.id, id))
 }

@@ -1,26 +1,23 @@
-import { supabaseAdmin } from '../index'
+import { desc, eq, inArray, like } from 'drizzle-orm'
+import { db } from '../index'
+import { invoices, workEntries } from '../schema'
 import type { Invoice, NewInvoice, Client, Agent, WorkEntry } from '../schema'
-import { fromDb, toDb } from '../mappers'
 
 export type InvoiceWithRelations = Invoice & { client: Client | null; agent: Agent | null }
 
 export async function getInvoices(): Promise<InvoiceWithRelations[]> {
-  const { data, error } = await supabaseAdmin
-    .from('invoices')
-    .select('*, client:clients(*), agent:agents(*)')
-    .order('created_at', { ascending: false })
-  if (error) throw error
-  return (data as unknown[]).map(row => fromDb<InvoiceWithRelations>(row))
+  return db.query.invoices.findMany({
+    orderBy: desc(invoices.createdAt),
+    with: { client: true, agent: true },
+  })
 }
 
 export async function getInvoice(id: string): Promise<InvoiceWithRelations | null> {
-  const { data, error } = await supabaseAdmin
-    .from('invoices')
-    .select('*, client:clients(*), agent:agents(*)')
-    .eq('id', id)
-    .single()
-  if (error) return null
-  return fromDb<InvoiceWithRelations>(data)
+  const invoice = await db.query.invoices.findFirst({
+    where: eq(invoices.id, id),
+    with: { client: true, agent: true },
+  })
+  return invoice ?? null
 }
 
 export async function getInvoiceWithEntries(
@@ -28,69 +25,59 @@ export async function getInvoiceWithEntries(
 ): Promise<(InvoiceWithRelations & { entries: WorkEntry[] }) | null> {
   const invoice = await getInvoice(id)
   if (!invoice) return null
-  const { data, error } = await supabaseAdmin
-    .from('work_entries')
-    .select('*')
-    .eq('invoice_id', id)
-    .order('date')
-  if (error) throw error
-  return { ...invoice, entries: (data as unknown[]).map(row => fromDb<WorkEntry>(row)) }
+  const entries = await db
+    .select()
+    .from(workEntries)
+    .where(eq(workEntries.invoiceId, id))
+    .orderBy(workEntries.date)
+  return { ...invoice, entries }
 }
 
 export async function createInvoice(
   values: Omit<NewInvoice, 'id' | 'createdAt' | 'updatedAt'>,
   entryIds: string[]
 ): Promise<Invoice> {
-  const { data: invoice, error: invErr } = await supabaseAdmin
-    .from('invoices')
-    .insert(toDb(values))
-    .select()
-    .single()
-  if (invErr) throw invErr
-
-  const { error: entryErr } = await supabaseAdmin
-    .from('work_entries')
-    .update({ invoice_id: invoice.id, updated_at: new Date().toISOString() })
-    .in('id', entryIds)
-  if (entryErr) throw entryErr
-
-  return fromDb<Invoice>(invoice)
+  return db.transaction(async (tx) => {
+    const [invoice] = await tx.insert(invoices).values(values).returning()
+    await tx
+      .update(workEntries)
+      .set({ invoiceId: invoice.id, updatedAt: new Date() })
+      .where(inArray(workEntries.id, entryIds))
+    return invoice
+  })
 }
 
 export async function updateInvoiceStatus(
   id: string,
   status: 'draft' | 'sent' | 'paid' | 'overdue' | 'voided'
 ): Promise<Invoice> {
-  const { data, error } = await supabaseAdmin
-    .from('invoices')
-    .update({ status, updated_at: new Date().toISOString() })
-    .eq('id', id)
-    .select()
-    .single()
-  if (error) throw error
-  return fromDb<Invoice>(data)
+  const [invoice] = await db
+    .update(invoices)
+    .set({ status, updatedAt: new Date() })
+    .where(eq(invoices.id, id))
+    .returning()
+  return invoice
 }
 
 export async function voidInvoice(id: string): Promise<void> {
   await updateInvoiceStatus(id, 'voided')
-  const { error } = await supabaseAdmin
-    .from('work_entries')
-    .update({ invoice_id: null, updated_at: new Date().toISOString() })
-    .eq('invoice_id', id)
-  if (error) throw error
+  await db
+    .update(workEntries)
+    .set({ invoiceId: null, updatedAt: new Date() })
+    .where(eq(workEntries.invoiceId, id))
 }
 
 export async function getNextSequenceNumber(type: 'client' | 'agent', tyCode: string): Promise<number> {
   const prefix  = type === 'client' ? 'INV' : 'AGT'
   const pattern = `${prefix}-${tyCode}-%`
-  const { data } = await supabaseAdmin
-    .from('invoices')
-    .select('invoice_number')
-    .like('invoice_number', pattern)
-    .order('invoice_number', { ascending: false })
+  const rows = await db
+    .select({ invoiceNumber: invoices.invoiceNumber })
+    .from(invoices)
+    .where(like(invoices.invoiceNumber, pattern))
+    .orderBy(desc(invoices.invoiceNumber))
     .limit(1)
-  if (!data || data.length === 0) return 1
-  const parts   = (data[0] as { invoice_number: string }).invoice_number.split('-')
+  if (rows.length === 0) return 1
+  const parts   = rows[0].invoiceNumber.split('-')
   const lastSeq = parseInt(parts[parts.length - 1], 10)
   return isNaN(lastSeq) ? 1 : lastSeq + 1
 }
