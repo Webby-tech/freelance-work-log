@@ -6,7 +6,7 @@ import { format, parseISO } from 'date-fns'
 import type { ReportEntry, ReportInvoice } from '@/lib/db/queries/reports'
 import type { Expense, UserSettings } from '@/lib/db/schema'
 import type { TaxYear } from '@/lib/tax-year'
-import { MILEAGE_RATE_STANDARD, MILEAGE_RATE_REDUCED, MILEAGE_THRESHOLD } from '@/lib/tax-year'
+import { getStandardMileageRateForTaxYear, MILEAGE_RATE_REDUCED, MILEAGE_THRESHOLD } from '@/lib/tax-year'
 
 const c = {
   black:   '#111827',
@@ -98,6 +98,7 @@ export function AnnualReportPDF({ taxYear, isPartial, entries, invoices, expense
   const name = settings.tradingName || settings.legalName || 'Actor'
   const yearLabel = taxYear.label.replace('/', '/20')
   const generatedOn = format(new Date(), 'd MMM yyyy')
+  const standardRate = getStandardMileageRateForTaxYear(taxYear)
 
   return (
     <Document title={`Annual Report ${yearLabel}`} author={name}>
@@ -259,8 +260,8 @@ export function AnnualReportPDF({ taxYear, isPartial, entries, invoices, expense
             if (miles > 0) {
               const standardMiles = Math.min(miles, Math.max(0, MILEAGE_THRESHOLD - runningMiles))
               const reducedMiles  = miles - standardMiles
-              const mileValue     = standardMiles * MILEAGE_RATE_STANDARD + reducedMiles * MILEAGE_RATE_REDUCED
-              const ratePence     = Math.round((reducedMiles > 0 ? MILEAGE_RATE_REDUCED : MILEAGE_RATE_STANDARD) * 100)
+              const mileValue     = standardMiles * standardRate + reducedMiles * MILEAGE_RATE_REDUCED
+              const ratePence     = Math.round((reducedMiles > 0 ? MILEAGE_RATE_REDUCED : standardRate) * 100)
               runningMiles += miles
               travelRows.push({ key: `${e.id}-mileage`, date: dateStr, job, description: `Mileage — ${miles} mi @ ${ratePence}p/mi`, amount: mileValue, isMileage: true })
               firstRow = false
@@ -334,4 +335,4 @@ export function AnnualReportPDF({ taxYear, isPartial, entries, invoices, expense
   )
 }
 
-export { MILEAGE_RATE_STANDARD, MILEAGE_RATE_REDUCED, MILEAGE_THRESHOLD }
+export { MILEAGE_RATE_REDUCED, MILEAGE_THRESHOLD }

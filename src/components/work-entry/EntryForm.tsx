@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import type { Client, WorkEntry, UserSettings } from '@/lib/db/schema'
 import { createEntryAction, updateEntryAction, type TravelItem } from '@/actions/entry.actions'
+import { getStandardMileageRateForDate } from '@/lib/tax-year'
 import { MileageField } from './MileageField'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -172,7 +173,7 @@ export function EntryForm({ clients, settings, existing, existingTravelItems }: 
         overrideOriginLng:  mileageData.overrideOriginLng ? String(mileageData.overrideOriginLng) : null,
         calculatedMilesRaw: mileageData.calculatedMilesRaw ? String(mileageData.calculatedMilesRaw) : null,
         returnMiles:        mileageData.returnMiles,
-        mileageRate:        String(settings.defaultMileageRate ?? '0.45'),
+        mileageRate:        String(getStandardMileageRateForDate(date)),
         travelExpenses:         String(travelItems.reduce((s, i) => s + Number(i.amount || 0), 0)),
         commissionExemptAmount: commissionExempt || '0',
         notes:                  notes || null,

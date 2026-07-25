@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic'
 import Link from 'next/link'
 import { format, parseISO } from 'date-fns'
-import { getCurrentTaxYear, getTaxYearForDate, formatTaxYearDates, MILEAGE_RATE_STANDARD, MILEAGE_RATE_REDUCED, MILEAGE_THRESHOLD } from '@/lib/tax-year'
+import { getCurrentTaxYear, getTaxYearForDate, formatTaxYearDates, getStandardMileageRateForTaxYear, MILEAGE_RATE_REDUCED, MILEAGE_THRESHOLD } from '@/lib/tax-year'
 import { getReportData } from '@/lib/db/queries/reports'
 import { getSettings } from '@/lib/db/queries/settings'
 import { estimateTax } from '@/lib/tax-estimate'
@@ -28,6 +28,7 @@ export default async function ReportsPage({
   const selectedLabel = params.year ?? currentTY.label
   const activeTY      = taxYears.find(ty => ty.label === selectedLabel) ?? currentTY
   const isPartial     = activeTY.label === currentTY.label
+  const standardRate  = getStandardMileageRateForTaxYear(activeTY)
 
   const start = activeTY.start.toISOString().split('T')[0]
   const end   = activeTY.end.toISOString().split('T')[0]
@@ -52,7 +53,7 @@ export default async function ReportsPage({
     // Mileage value with 10k threshold
     const standardMiles = Math.min(miles, Math.max(0, MILEAGE_THRESHOLD - runningMiles))
     const reducedMiles  = miles - standardMiles
-    const mileValue     = standardMiles * MILEAGE_RATE_STANDARD + reducedMiles * MILEAGE_RATE_REDUCED
+    const mileValue     = standardMiles * standardRate + reducedMiles * MILEAGE_RATE_REDUCED
     runningMiles += miles
 
     grossFees      += fee
@@ -61,7 +62,7 @@ export default async function ReportsPage({
 
     // Store per-entry mileage for travel section
     if (miles > 0) {
-      const rate = reducedMiles > 0 ? MILEAGE_RATE_REDUCED : MILEAGE_RATE_STANDARD
+      const rate = reducedMiles > 0 ? MILEAGE_RATE_REDUCED : standardRate
       entryMileage.set(e.id, { miles, value: mileValue, rate })
     }
 

@@ -44,24 +44,57 @@ export function formatTaxYearDates(taxYear: TaxYear): string {
   return `6 Apr ${taxYear.start.getFullYear()} – 5 Apr ${taxYear.end.getFullYear()}`
 }
 
-// HMRC mileage rate: 45p for first 10,000 miles, then 25p
-export const MILEAGE_RATE_STANDARD = 0.45
-export const MILEAGE_RATE_REDUCED  = 0.25
-export const MILEAGE_THRESHOLD     = 10_000
+// HMRC mileage rate: a standard rate for the first 10,000 business miles in a
+// tax year, then a reduced rate above that. The reduced rate has stayed at 25p
+// throughout; the standard rate is effective-dated below (45p, then 55p from
+// the 2026/27 tax year — 6 April 2026).
+export const MILEAGE_RATE_REDUCED = 0.25
+export const MILEAGE_THRESHOLD    = 10_000
 
-export function getMileageRateForYtdMiles(ytdMilesBefore: number): number {
-  return ytdMilesBefore >= MILEAGE_THRESHOLD ? MILEAGE_RATE_REDUCED : MILEAGE_RATE_STANDARD
+const MILEAGE_STANDARD_RATE_SCHEDULE: { effectiveFrom: string; rate: number }[] = [
+  { effectiveFrom: '2000-01-01', rate: 0.45 },
+  { effectiveFrom: '2026-04-06', rate: 0.55 },
+]
+
+function toLocalIsoDate(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+// Returns the standard mileage rate in effect for a given date (YYYY-MM-DD or Date).
+// Date objects are formatted from their local calendar fields, not via
+// toISOString() — that converts to UTC and can shift the date backward by a
+// day in BST, which would misclassify entries right at the 6 April boundary.
+export function getStandardMileageRateForDate(date: Date | string): number {
+  const iso = typeof date === 'string' ? date : toLocalIsoDate(date)
+  let rate = MILEAGE_STANDARD_RATE_SCHEDULE[0].rate
+  for (const entry of MILEAGE_STANDARD_RATE_SCHEDULE) {
+    if (iso >= entry.effectiveFrom) rate = entry.rate
+  }
+  return rate
+}
+
+// The standard mileage rate never changes mid-tax-year, so the tax year's
+// start date (6 April) is enough to resolve the rate for the whole year.
+export function getStandardMileageRateForTaxYear(taxYear: TaxYear): number {
+  return getStandardMileageRateForDate(taxYear.start)
+}
+
+export function getMileageRateForYtdMiles(ytdMilesBefore: number, standardRate: number): number {
+  return ytdMilesBefore >= MILEAGE_THRESHOLD ? MILEAGE_RATE_REDUCED : standardRate
 }
 
 /**
  * Calculate total mileage allowance for a batch of miles, accounting for
  * the 10,000-mile threshold crossing mid-year.
  */
-export function calculateMileageAllowance(miles: number, ytdMilesBefore: number): number {
+export function calculateMileageAllowance(miles: number, ytdMilesBefore: number, standardRate: number): number {
   if (ytdMilesBefore >= MILEAGE_THRESHOLD) {
     return miles * MILEAGE_RATE_REDUCED
   }
   const standardMiles = Math.min(miles, MILEAGE_THRESHOLD - ytdMilesBefore)
   const reducedMiles  = miles - standardMiles
-  return standardMiles * MILEAGE_RATE_STANDARD + reducedMiles * MILEAGE_RATE_REDUCED
+  return standardMiles * standardRate + reducedMiles * MILEAGE_RATE_REDUCED
 }

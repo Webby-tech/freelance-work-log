@@ -4,7 +4,7 @@ import { getEntries, getUninvoicedSummary, getYtdMiles } from '@/lib/db/queries/
 import { getSettings } from '@/lib/db/queries/settings'
 import { getYtdExpenses, getYtdExpensesTotal, getRecentUniqueExpenses } from '@/lib/db/queries/expenses'
 import { estimateTax } from '@/lib/tax-estimate'
-import { getCurrentTaxYear, formatTaxYearDates, MILEAGE_RATE_STANDARD, MILEAGE_RATE_REDUCED, MILEAGE_THRESHOLD } from '@/lib/tax-year'
+import { getCurrentTaxYear, formatTaxYearDates, getStandardMileageRateForTaxYear, MILEAGE_RATE_REDUCED, MILEAGE_THRESHOLD } from '@/lib/tax-year'
 import { formatCurrency } from '@/lib/utils'
 import { TaxEstimateCard } from '@/components/dashboard/TaxEstimateCard'
 import { MonthlyCard } from '@/components/dashboard/MonthlyCard'
@@ -25,6 +25,7 @@ export default async function DashboardPage() {
   ])
 
   const taxYear = getCurrentTaxYear()
+  const standardRate = getStandardMileageRateForTaxYear(taxYear)
 
   if (!settings) {
     return (
@@ -56,10 +57,10 @@ export default async function DashboardPage() {
     const tavel = Number(e.travelExpenses ?? 0)
 
     // HMRC mileage rate with 10k threshold
-    const rate = runningMiles >= MILEAGE_THRESHOLD ? MILEAGE_RATE_REDUCED : MILEAGE_RATE_STANDARD
+    const rate = runningMiles >= MILEAGE_THRESHOLD ? MILEAGE_RATE_REDUCED : standardRate
     const standardMiles = Math.min(miles, Math.max(0, MILEAGE_THRESHOLD - runningMiles))
     const reducedMiles  = miles - standardMiles
-    const mileValue     = standardMiles * MILEAGE_RATE_STANDARD + reducedMiles * MILEAGE_RATE_REDUCED
+    const mileValue     = standardMiles * standardRate + reducedMiles * MILEAGE_RATE_REDUCED
     runningMiles += miles
 
     ytdGrossFees      += fee
@@ -137,7 +138,7 @@ export default async function DashboardPage() {
         <SummaryTile
           label="YTD miles"
           value={`${ytdMiles} mi`}
-          sub={ytdMiles >= MILEAGE_THRESHOLD ? '25p rate active' : `${MILEAGE_THRESHOLD - ytdMiles} mi remaining at 45p`}
+          sub={ytdMiles >= MILEAGE_THRESHOLD ? '25p rate active' : `${MILEAGE_THRESHOLD - ytdMiles} mi remaining at ${Math.round(standardRate * 100)}p`}
         />
       </div>
 
