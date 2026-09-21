@@ -35,6 +35,9 @@ export function ClientForm({ agents, existing, isAgent = false }: Props) {
   const [address, setAddress] = useState(existing?.address ?? '')
   const [type,    setType]    = useState<'standard' | 'payroll'>(existingClient?.type ?? 'standard')
   const [agentId, setAgentId] = useState(existingClient?.agentId ?? '')
+  const [defaultTravelCap, setDefaultTravelCap] = useState(
+    existingClient?.defaultTravelReimbursementCap ? String(Number(existingClient.defaultTravelReimbursementCap)) : ''
+  )
   const [commissionRate, setCommissionRate] = useState(
     existingAgent?.commissionRate
       ? String(Math.round(Number(existingAgent.commissionRate) * 100 * 10) / 10)
@@ -65,6 +68,7 @@ export function ClientForm({ agents, existing, isAgent = false }: Props) {
           address: address || null,
           type,
           agentId: (type === 'payroll' && agentId) ? agentId : null,
+          defaultTravelReimbursementCap: defaultTravelCap.trim() === '' ? null : defaultTravelCap,
         }
         if (existingClient) {
           await updateClientAction(existingClient.id, payload)
@@ -163,6 +167,21 @@ export function ClientForm({ agents, existing, isAgent = false }: Props) {
                   No agents found. Add an agent first to link a payroll client.
                 </p>
               )}
+
+              <div>
+                <Label className="text-xs">Default travel cap (£)</Label>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-sm text-slate-500">£</span>
+                  <Input
+                    type="number" min="0" step="0.01"
+                    value={defaultTravelCap}
+                    onChange={e => setDefaultTravelCap(e.target.value)}
+                    placeholder="None"
+                    className="w-28"
+                  />
+                </div>
+                <p className="text-xs text-slate-500 mt-1">If this client reimburses travel at cost, the most per job. Pre-fills the cap on new entries; you can change it per entry.</p>
+              </div>
             </>
           )}
 

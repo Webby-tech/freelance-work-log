@@ -2,7 +2,9 @@
 import {
   Document, Page, Text, View, StyleSheet,
 } from '@react-pdf/renderer'
+import { Fragment } from 'react'
 import type { Invoice, Client, WorkEntry, UserSettings } from '@/lib/db/schema'
+import type { EntryReimbursement } from '@/lib/reimbursement'
 import { calculateInvoiceTotals } from '@/lib/invoicing'
 import { formatDate, formatDateRange } from '@/lib/utils'
 
@@ -31,10 +33,12 @@ interface Props {
   client: Client
   entries: WorkEntry[]
   settings: UserSettings
+  // Reimbursed travel per entry (only entries that use it). Omitted for older invoices.
+  reimbursement?: Record<string, EntryReimbursement>
 }
 
-export function ClientInvoicePDF({ invoice, client, entries, settings }: Props) {
-  const totals = calculateInvoiceTotals(entries)
+export function ClientInvoicePDF({ invoice, client, entries, settings, reimbursement = {} }: Props) {
+  const totals = calculateInvoiceTotals(entries, undefined, reimbursement)
 
   return (
     <Document>
@@ -80,24 +84,40 @@ export function ClientInvoicePDF({ invoice, client, entries, settings }: Props) 
 
           {entries.map(e => {
             const fee    = Number(e.flatFee ?? 0)
-            const travel = Number(e.travelExpenses ?? 0)
+            const r      = reimbursement[e.id]
+            // Entries using reimbursed travel show the fee here and the travel on its own "at cost" line
+            const travel = r && r.flagged > 0 ? 0 : Number(e.travelExpenses ?? 0)
             const lineTotal = fee + travel
 
             const dateStr = formatDateRange(e.date, e.endDate)
             const desc = [dateStr, e.locationName ?? '', e.details ?? ''].filter(Boolean).join(' — ')
 
             return (
-              <View key={e.id} style={styles.row}>
-                <Text style={styles.colLeft}>{desc}</Text>
-                <Text style={styles.colRight}>{`£${lineTotal.toFixed(2)}`}</Text>
-              </View>
+              <Fragment key={e.id}>
+                <View style={styles.row}>
+                  <Text style={styles.colLeft}>{desc}</Text>
+                  <Text style={styles.colRight}>{`£${lineTotal.toFixed(2)}`}</Text>
+                </View>
+                {r && r.billable > 0 ? (
+                  <View style={styles.row}>
+                    <Text style={[styles.colLeft, { color: '#64748b' }]}>{`Travel (at cost) — ${e.locationName ?? dateStr}`}</Text>
+                    <Text style={styles.colRight}>{`£${r.billable.toFixed(2)}`}</Text>
+                  </View>
+                ) : null}
+              </Fragment>
             )
           })}
 
           <View style={styles.rowBold}>
             <Text style={[styles.colLeft, { fontFamily: 'Helvetica-Bold' }]}>Total</Text>
-            <Text style={[styles.colRight, { fontFamily: 'Helvetica-Bold' }]}>{`£${totals.grossFees.toFixed(2)}`}</Text>
+            <Text style={[styles.colRight, { fontFamily: 'Helvetica-Bold' }]}>{`£${totals.clientTotal.toFixed(2)}`}</Text>
           </View>
+          {totals.reimbursedTravel > 0 ? (
+            <View style={styles.row}>
+              <Text style={[styles.colLeft, { color: '#64748b' }]}>of which fees</Text>
+              <Text style={[styles.colRight, { color: '#64748b' }]}>{`£${totals.grossFees.toFixed(2)}`}</Text>
+            </View>
+          ) : null}
         </View>
 
         {/* Bank details */}

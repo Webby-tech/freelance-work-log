@@ -7,6 +7,7 @@ import type { Client } from '@/lib/db/schema'
 import type { WorkEntryWithClient } from '@/lib/db/queries/entries'
 import { deleteEntryAction } from '@/actions/entry.actions'
 import { formatCurrency, formatDateRange } from '@/lib/utils'
+import { parseCap, claimsMileageAndReimbursedTravel, type EntryReimbursement } from '@/lib/reimbursement'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Pencil, Trash2, MapPin } from 'lucide-react'
@@ -16,9 +17,11 @@ interface Props {
   clients: Client[]
   taxYears: string[]
   selectedYear: string
+  // Only entries that use reimbursed travel appear here
+  reimbursement?: Record<string, EntryReimbursement>
 }
 
-export function EntryTable({ entries, clients, taxYears, selectedYear }: Props) {
+export function EntryTable({ entries, clients, taxYears, selectedYear, reimbursement = {} }: Props) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -110,6 +113,8 @@ export function EntryTable({ entries, clients, taxYears, selectedYear }: Props) 
             const mileRate  = Number(e.mileageRate ?? 0.45)
             const mileValue = miles * mileRate
             const travel    = Number(e.travelExpenses ?? 0)
+            const r         = reimbursement[e.id]
+            const cap       = parseCap(e.travelReimbursementCap)
 
             return (
               <div
@@ -141,6 +146,25 @@ export function EntryTable({ entries, clients, taxYears, selectedYear }: Props) 
                         <span>Travel {formatCurrency(travel)}</span>
                       )}
                     </div>
+                    {(r || cap !== null) && (
+                      <p className="text-xs text-slate-500 mt-1">
+                        {cap !== null && <>Travel cap {formatCurrency(cap)}</>}
+                        {cap !== null && r && ' · '}
+                        {r && <>Reimbursed {formatCurrency(r.billable)}</>}
+                        {r && r.headroom !== null && <> · {formatCurrency(r.headroom)} headroom</>}
+                        {!r && cap !== null && <> · none reimbursed</>}
+                      </p>
+                    )}
+                    {r && r.excess > 0 && (
+                      <p className="text-xs text-amber-800 mt-1">
+                        Over cap: {formatCurrency(r.excess)} is not reimbursable and stays an ordinary travel expense.
+                      </p>
+                    )}
+                    {r && claimsMileageAndReimbursedTravel(e.returnMiles, r.flagged) && (
+                      <p className="text-xs text-amber-800 mt-1">
+                        Has both mileage and reimbursed travel — claim a journey one way or the other, not both.
+                      </p>
+                    )}
                   </div>
                   <div className="flex gap-1 shrink-0">
                     <Button asChild variant="ghost" size="icon" className="h-7 w-7" title={e.invoiceId ? 'Edit (invoiced — fee changes won\'t alter the invoice)' : 'Edit'}>

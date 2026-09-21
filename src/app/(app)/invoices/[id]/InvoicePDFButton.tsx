@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Download } from 'lucide-react'
 import type { Invoice, Client, Agent, WorkEntry, UserSettings } from '@/lib/db/schema'
+import type { EntryReimbursement } from '@/lib/reimbursement'
 
 // Single dynamic import — all react-pdf code loads together, eliminating the
 // race condition where PDFDownloadLink resolves before the document component.
@@ -16,9 +17,10 @@ interface Props {
   invoice: Invoice & { client: Client | null; agent: Agent | null }
   settings: UserSettings
   entries: WorkEntry[]
+  reimbursement?: Record<string, EntryReimbursement>
 }
 
-export function InvoicePDFButton({ invoice, settings, entries }: Props) {
+export function InvoicePDFButton({ invoice, settings, entries, reimbursement }: Props) {
   const [ready, setReady] = useState(false)
 
   if (!ready) {
@@ -29,5 +31,5 @@ export function InvoicePDFButton({ invoice, settings, entries }: Props) {
     )
   }
 
-  return <PDFDownloadWrapper invoice={invoice} settings={settings} entries={entries} />
+  return <PDFDownloadWrapper invoice={invoice} settings={settings} entries={entries} reimbursement={reimbursement} />
 }

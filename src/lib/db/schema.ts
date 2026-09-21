@@ -34,6 +34,8 @@ export const clients = pgTable('clients', {
   phone:     text('phone'),
   type:      text('type').notNull().$type<'standard' | 'payroll'>(),
   agentId:   uuid('agent_id').references(() => agents.id),
+  // Pre-fills the per-job travel reimbursement cap on new entries (always overridable per entry)
+  defaultTravelReimbursementCap: numeric('default_travel_reimbursement_cap', { precision: 10, scale: 2 }),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).default(sql`now()`),
   updatedAt: timestamp('updated_at', { withTimezone: true }).default(sql`now()`),
@@ -86,6 +88,8 @@ export const workEntries = pgTable('work_entries', {
   mileageRate:         numeric('mileage_rate', { precision: 6, scale: 4 }).default('0.45'),
   travelExpenses:         numeric('travel_expenses', { precision: 10, scale: 2 }).default('0'),
   commissionExemptAmount: numeric('commission_exempt_amount', { precision: 10, scale: 2 }).default('0'),
+  // Per-job cap on travel the client reimburses at cost. null = no cap set.
+  travelReimbursementCap: numeric('travel_reimbursement_cap', { precision: 10, scale: 2 }),
 
   invoiceId:           uuid('invoice_id').references(() => invoices.id),
   notes:               text('notes'),
@@ -101,6 +105,8 @@ export const travelExpenseItems = pgTable('travel_expense_items', {
   workEntryId: uuid('work_entry_id').notNull().references(() => workEntries.id, { onDelete: 'cascade' }),
   description: text('description').notNull(),
   amount:      numeric('amount', { precision: 10, scale: 2 }).notNull(),
+  // true = billed to the client at cost (pass-through: excluded from tax income and expenses)
+  reimbursed:  boolean('reimbursed').notNull().default(false),
   createdAt:   timestamp('created_at', { withTimezone: true }).default(sql`now()`),
 })
 

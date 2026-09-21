@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 import Link from 'next/link'
 import { getEntries } from '@/lib/db/queries/entries'
 import { getClients } from '@/lib/db/queries/clients'
+import { getReimbursementByEntry } from '@/lib/db/queries/travel-expenses'
 import { getCurrentTaxYear, getTaxYearForDate } from '@/lib/tax-year'
 import { Button } from '@/components/ui/button'
 import { EntryTable } from '@/components/work-entry/EntryTable'
@@ -40,6 +41,7 @@ export default async function LogPage({
     }),
     getClients(),
   ])
+  const reimbursement = await getReimbursementByEntry(entries.map(e => e.id))
 
   return (
     <div className="max-w-5xl mx-auto p-6 space-y-5">
@@ -58,6 +60,7 @@ export default async function LogPage({
         clients={clients}
         taxYears={taxYears.map(ty => ty.label)}
         selectedYear={selectedYear}
+        reimbursement={reimbursement}
       />
     </div>
   )

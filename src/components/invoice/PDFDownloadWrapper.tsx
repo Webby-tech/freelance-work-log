@@ -5,14 +5,16 @@ import { Download } from 'lucide-react'
 import { ClientInvoicePDF } from './ClientInvoicePDF'
 import { AgentInvoicePDF } from './AgentInvoicePDF'
 import type { Invoice, Client, Agent, WorkEntry, UserSettings } from '@/lib/db/schema'
+import type { EntryReimbursement } from '@/lib/reimbursement'
 
 interface Props {
   invoice: Invoice & { client: Client | null; agent: Agent | null }
   settings: UserSettings
   entries: WorkEntry[]
+  reimbursement?: Record<string, EntryReimbursement>
 }
 
-export function PDFDownloadWrapper({ invoice, settings, entries }: Props) {
+export function PDFDownloadWrapper({ invoice, settings, entries, reimbursement }: Props) {
   const isPayroll = invoice.type === 'agent_commission'
   const filename  = `${invoice.invoiceNumber}.pdf`
 
@@ -30,6 +32,7 @@ export function PDFDownloadWrapper({ invoice, settings, entries }: Props) {
       client={invoice.client}
       entries={entries}
       settings={settings}
+      reimbursement={reimbursement}
     />
   ) : null
 

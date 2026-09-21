@@ -7,6 +7,7 @@ import type { ReportEntry, ReportInvoice } from '@/lib/db/queries/reports'
 import type { Expense, UserSettings } from '@/lib/db/schema'
 import type { TaxYear } from '@/lib/tax-year'
 import { getStandardMileageRateForTaxYear, MILEAGE_RATE_REDUCED, MILEAGE_THRESHOLD } from '@/lib/tax-year'
+import { calculateReimbursement } from '@/lib/reimbursement'
 
 const c = {
   black:   '#111827',
@@ -67,6 +68,7 @@ export interface ReportSummary {
   mileageClaim:          number
   totalReturnMiles:      number
   travelExpenses:        number
+  reimbursedExpenses:    number
   agentCommission:       number
   generalExpenses:       number
   totalAllowableExpenses: number
@@ -162,6 +164,28 @@ export function AnnualReportPDF({ taxYear, isPartial, entries, invoices, expense
           Personal allowance is fully used by pension income — acting income taxable from £1. No NI (age 67).
           {settings.utrNumber ? '' : '  UTR not set — add in Settings.'}
         </Text>
+
+        {summary.reimbursedExpenses > 0 && (
+          <View style={s.section}>
+            <Text style={s.sectionHd}>Reimbursed expenses (billed to clients at cost)</Text>
+            <View style={s.summaryRow}>
+              <Text style={s.summaryLbl}>Reimbursed expenses</Text>
+              <Text style={s.summaryVal}>{gbp(summary.reimbursedExpenses)}</Text>
+            </View>
+            <View style={s.summaryRow}>
+              <Text style={s.summaryLbl}>Turnover for Self Assessment (fees + reimbursed)</Text>
+              <Text style={s.summaryVal}>{gbp(summary.grossFees + summary.reimbursedExpenses)}</Text>
+            </View>
+            <View style={s.summaryRow}>
+              <Text style={s.summaryLbl}>Expenses for Self Assessment (allowable + reimbursed)</Text>
+              <Text style={s.summaryVal}>{gbp(summary.totalAllowableExpenses + summary.reimbursedExpenses)}</Text>
+            </View>
+            <Text style={s.taxNote}>
+              Reimbursed travel is income and an expense that cancel out, so it is excluded from taxable profit above.
+              A Self Assessment return normally reports both figures gross — confirm the treatment with your accountant before filing.
+            </Text>
+          </View>
+        )}
 
         {/* Monthly breakdown */}
         <View style={s.section}>
@@ -270,11 +294,16 @@ export function AnnualReportPDF({ taxYear, isPartial, entries, invoices, expense
             if (hasTravelExpenses) {
               if (e.travelItems && e.travelItems.length > 0) {
                 e.travelItems.forEach((item, idx) => {
-                  travelRows.push({ key: `${e.id}-t${idx}`, date: firstRow && idx === 0 ? dateStr : '', job: firstRow && idx === 0 ? job : '', description: item.description, amount: Number(item.amount) })
+                  travelRows.push({ key: `${e.id}-t${idx}`, date: firstRow && idx === 0 ? dateStr : '', job: firstRow && idx === 0 ? job : '', description: item.reimbursed ? `${item.description} (reimbursed by client)` : item.description, amount: Number(item.amount) })
                   firstRow = false
                 })
               } else {
                 travelRows.push({ key: `${e.id}-travel`, date: firstRow ? dateStr : '', job: firstRow ? job : '', description: 'Travel expenses', amount: Number(e.travelExpenses) })
+              }
+              // Pass-through: taken back out so the table reconciles to the allowable travel total
+              const passThrough = calculateReimbursement(e.travelItems ?? [], e.travelReimbursementCap).billable
+              if (passThrough > 0) {
+                travelRows.push({ key: `${e.id}-reimbursed`, date: '', job: '', description: 'Less: reimbursed by client (excluded)', amount: -passThrough })
               }
             }
           }

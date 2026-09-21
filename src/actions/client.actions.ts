@@ -14,6 +14,7 @@ export async function createClientAction(values: {
   address?: string | null
   type: 'standard' | 'payroll'
   agentId?: string | null
+  defaultTravelReimbursementCap?: string | null
 }) {
   const client = await createClient({
     name: values.name,
@@ -22,6 +23,7 @@ export async function createClientAction(values: {
     address: values.address ?? null,
     type: values.type,
     agentId: values.agentId ?? null,
+    defaultTravelReimbursementCap: values.defaultTravelReimbursementCap ?? null,
   })
   revalidatePath('/clients')
   return client
@@ -34,6 +36,7 @@ export async function updateClientAction(id: string, values: {
   address?: string | null
   type?: 'standard' | 'payroll'
   agentId?: string | null
+  defaultTravelReimbursementCap?: string | null
 }) {
   const client = await updateClient(id, {
     name: values.name,
@@ -42,6 +45,7 @@ export async function updateClientAction(id: string, values: {
     address: values.address,
     type: values.type,
     agentId: values.agentId,
+    defaultTravelReimbursementCap: values.defaultTravelReimbursementCap,
   })
   revalidatePath('/clients', 'layout')
   return client

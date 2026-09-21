@@ -30,7 +30,7 @@ export default async function EditEntryPage({ params }: { params: Promise<{ id: 
         clients={clients}
         settings={settings}
         existing={entry}
-        existingTravelItems={travelItems.map(i => ({ description: i.description, amount: String(i.amount) }))}
+        existingTravelItems={travelItems.map(i => ({ description: i.description, amount: String(i.amount), reimbursed: i.reimbursed }))}
       />
     </div>
   )

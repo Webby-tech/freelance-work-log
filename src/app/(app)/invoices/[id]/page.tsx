@@ -5,6 +5,7 @@ import { getInvoiceWithEntries } from '@/lib/db/queries/invoices'
 import { getSettings } from '@/lib/db/queries/settings'
 import { formatCurrency, formatDate, formatDateRange } from '@/lib/utils'
 import { calculateInvoiceTotals } from '@/lib/invoicing'
+import { getReimbursementByEntry } from '@/lib/db/queries/travel-expenses'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -33,8 +34,9 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
     ? Number((invoice.agent as any).commission_rate ?? 0.125)
     : 0.125
 
+  const reimbursement = await getReimbursementByEntry(invoice.entries.map(e => e.id))
   const totals = invoice.entries.length > 0
-    ? calculateInvoiceTotals(invoice.entries as WorkEntry[], commissionRate)
+    ? calculateInvoiceTotals(invoice.entries as WorkEntry[], commissionRate, reimbursement)
     : null
 
   const isPayroll = invoice.type === 'agent_commission'
@@ -55,7 +57,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
           </p>
         </div>
         <div className="flex gap-2">
-          {settings && <InvoicePDFButton invoice={invoice} settings={settings} entries={invoice.entries as WorkEntry[]} />}
+          {settings && <InvoicePDFButton invoice={invoice} settings={settings} entries={invoice.entries as WorkEntry[]} reimbursement={reimbursement} />}
           {invoice.status !== 'voided' && (
             <InvoiceStatusActions invoiceId={invoice.id} currentStatus={invoice.status} />
           )}
@@ -111,17 +113,27 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         <CardContent className="space-y-2 pb-4">
           {(invoice.entries as WorkEntry[]).map(e => {
             const fee    = Number(e.flatFee ?? 0)
-            const travel = Number(e.travelExpenses ?? 0)
+            const r      = reimbursement[e.id]
+            // Entries using reimbursed travel show their fee here and the travel on its own line below
+            const travel = r && r.flagged > 0 ? 0 : Number(e.travelExpenses ?? 0)
             // Payroll invoices: show flat fee only — travel doesn't attract commission
             const displayAmount = isPayroll ? fee : fee + travel
             return (
-              <div key={e.id} className="flex justify-between text-sm">
-                <span className="text-slate-700">
-                  {formatDateRange(e.date, e.endDate)}
-                  {' — '}<span className="font-medium">{e.locationName}</span>
-                  {e.details ? ` — ${e.details}` : ''}
-                </span>
-                <span className="shrink-0 ml-3">{formatCurrency(displayAmount)}</span>
+              <div key={e.id} className="space-y-1">
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-700">
+                    {formatDateRange(e.date, e.endDate)}
+                    {' — '}<span className="font-medium">{e.locationName}</span>
+                    {e.details ? ` — ${e.details}` : ''}
+                  </span>
+                  <span className="shrink-0 ml-3">{formatCurrency(displayAmount)}</span>
+                </div>
+                {!isPayroll && r && r.billable > 0 && (
+                  <div className="flex justify-between text-sm text-slate-500 pl-4">
+                    <span>Travel (at cost)</span>
+                    <span className="shrink-0 ml-3">{formatCurrency(r.billable)}</span>
+                  </div>
+                )}
               </div>
             )
           })}
@@ -134,9 +146,14 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
                   <span>Gross fees</span><span>{formatCurrency(totals.grossFees)}</span>
                 </div>
                 {/* Travel expenses only relevant for standard (client) invoices */}
-                {!isPayroll && totals.travelExpenses > 0 && (
+                {!isPayroll && totals.otherTravel > 0 && (
                   <div className="flex justify-between text-slate-600">
-                    <span>Travel expenses</span><span>{formatCurrency(totals.travelExpenses)}</span>
+                    <span>Travel expenses</span><span>{formatCurrency(totals.otherTravel)}</span>
+                  </div>
+                )}
+                {!isPayroll && totals.reimbursedTravel > 0 && (
+                  <div className="flex justify-between text-slate-600">
+                    <span>Travel (at cost)</span><span>{formatCurrency(totals.reimbursedTravel)}</span>
                   </div>
                 )}
                 {isPayroll && totals.exemptAmount > 0 && (
@@ -158,8 +175,11 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
                 {!isPayroll && (
                   <div className="flex justify-between font-semibold border-t pt-1">
                     <span>Total</span>
-                    <span>{formatCurrency(totals.grossFees + totals.travelExpenses)}</span>
+                    <span>{formatCurrency(totals.grossFees + totals.otherTravel + totals.reimbursedTravel)}</span>
                   </div>
+                )}
+                {!isPayroll && totals.reimbursedTravel > 0 && (
+                  <p className="text-xs text-slate-400 text-right">of which fees: {formatCurrency(totals.grossFees)}</p>
                 )}
               </div>
             </>

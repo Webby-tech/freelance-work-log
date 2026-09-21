@@ -5,11 +5,14 @@ import { toast } from 'sonner'
 import type { Client, WorkEntry, UserSettings } from '@/lib/db/schema'
 import { createEntryAction, updateEntryAction, type TravelItem } from '@/actions/entry.actions'
 import { getStandardMileageRateForDate } from '@/lib/tax-year'
+import { calculateReimbursement, claimsMileageAndReimbursedTravel } from '@/lib/reimbursement'
+import { formatCurrency } from '@/lib/utils'
 import { MileageField } from './MileageField'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Textarea } from '@/components/ui/textarea'
 import { Separator } from '@/components/ui/separator'
 import { Search, Loader2, Plus, Trash2 } from 'lucide-react'
@@ -62,6 +65,10 @@ export function EntryForm({ clients, settings, existing, existingTravelItems }: 
       ? existingTravelItems
       : []
   )
+  // Per-job cap on reimbursed travel. Pre-filled from the client default on NEW entries
+  // until the user edits it themselves.
+  const [travelCap,    setTravelCap]    = useState(existing?.travelReimbursementCap ? String(existing.travelReimbursementCap) : '')
+  const capEdited = useRef(false)
   const [details,        setDetails]        = useState(existing?.details ?? '')
   const [notes,          setNotes]          = useState(existing?.notes ?? '')
   const [mileageData,    setMileageData]    = useState<MileageData>({
@@ -91,6 +98,19 @@ export function EntryForm({ clients, settings, existing, existingTravelItems }: 
 
   const homeLat = settings.homeLat ? Number(settings.homeLat) : 51.5074
   const homeLng = settings.homeLng ? Number(settings.homeLng) : -0.1278
+
+  function handleClientChange(id: string) {
+    setClientId(id)
+    if (!existing && !capEdited.current) {
+      const def = clients.find(c => c.id === id)?.defaultTravelReimbursementCap
+      setTravelCap(def ? String(Number(def)) : '')
+    }
+  }
+
+  // Same filter the save uses, so the summary matches what gets stored.
+  const validTravelItems = travelItems.filter(i => i.description.trim() && Number(i.amount) > 0)
+  const reimb = calculateReimbursement(validTravelItems, travelCap)
+  const mileageAndReimbursed = claimsMileageAndReimbursedTravel(mileageData.returnMiles, reimb.flagged)
 
   // Inclusive day count: 28 Apr → 30 Apr = 3 days
   const numDays = (() => {
@@ -176,9 +196,10 @@ export function EntryForm({ clients, settings, existing, existingTravelItems }: 
         mileageRate:        String(getStandardMileageRateForDate(date)),
         travelExpenses:         String(travelItems.reduce((s, i) => s + Number(i.amount || 0), 0)),
         commissionExemptAmount: commissionExempt || '0',
+        travelReimbursementCap: travelCap.trim() === '' ? null : travelCap,
         notes:                  notes || null,
       }
-      const validItems = travelItems.filter(i => i.description.trim() && Number(i.amount) > 0)
+      const validItems = validTravelItems.map(i => ({ ...i, reimbursed: !!i.reimbursed }))
       if (existing) {
         await updateEntryAction(existing.id, payload, validItems)
         toast.success('Entry updated')
@@ -210,7 +231,7 @@ export function EntryForm({ clients, settings, existing, existingTravelItems }: 
             <Label className="text-xs">Client *</Label>
             <select
               value={clientId}
-              onChange={e => setClientId(e.target.value)}
+              onChange={e => handleClientChange(e.target.value)}
               required
               className="mt-1 flex h-9 w-full rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
@@ -353,38 +374,83 @@ export function EntryForm({ clients, settings, existing, existingTravelItems }: 
             <Label className="text-xs">Travel expenses</Label>
             <div className="mt-1 space-y-2">
               {travelItems.map((item, idx) => (
-                <div key={idx} className="flex items-center gap-2">
-                  <Input
-                    value={item.description}
-                    onChange={e => setTravelItems(prev => prev.map((it, i) => i === idx ? { ...it, description: e.target.value } : it))}
-                    placeholder="e.g. Parking, Train fare, Toll"
-                    className="flex-1"
-                  />
-                  <span className="text-sm text-slate-500 shrink-0">£</span>
-                  <Input
-                    type="number" min="0" step="0.01"
-                    value={item.amount}
-                    onChange={e => setTravelItems(prev => prev.map((it, i) => i === idx ? { ...it, amount: e.target.value } : it))}
-                    placeholder="0.00"
-                    className="w-24 shrink-0"
-                  />
-                  <Button
-                    type="button" variant="ghost" size="icon"
-                    className="h-8 w-8 text-red-400 hover:text-red-600 shrink-0"
-                    onClick={() => setTravelItems(prev => prev.filter((_, i) => i !== idx))}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                <div key={idx} className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={item.description}
+                      onChange={e => setTravelItems(prev => prev.map((it, i) => i === idx ? { ...it, description: e.target.value } : it))}
+                      placeholder="e.g. Parking, Train fare, Toll"
+                      className="flex-1"
+                    />
+                    <span className="text-sm text-slate-500 shrink-0">£</span>
+                    <Input
+                      type="number" min="0" step="0.01"
+                      value={item.amount}
+                      onChange={e => setTravelItems(prev => prev.map((it, i) => i === idx ? { ...it, amount: e.target.value } : it))}
+                      placeholder="0.00"
+                      className="w-24 shrink-0"
+                    />
+                    <Button
+                      type="button" variant="ghost" size="icon"
+                      className="h-8 w-8 text-red-400 hover:text-red-600 shrink-0"
+                      onClick={() => setTravelItems(prev => prev.filter((_, i) => i !== idx))}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                  <label className="flex items-center gap-2 pl-1 text-xs text-slate-600 cursor-pointer w-fit">
+                    <Checkbox
+                      checked={!!item.reimbursed}
+                      onCheckedChange={checked => setTravelItems(prev => prev.map((it, i) => i === idx ? { ...it, reimbursed: !!checked } : it))}
+                    />
+                    Reimbursed by client
+                  </label>
                 </div>
               ))}
               <Button
                 type="button" variant="outline" size="sm"
                 className="w-full text-xs"
-                onClick={() => setTravelItems(prev => [...prev, { description: '', amount: '' }])}
+                onClick={() => setTravelItems(prev => [...prev, { description: '', amount: '', reimbursed: false }])}
               >
                 <Plus className="h-3.5 w-3.5 mr-1" />Add travel expense
               </Button>
             </div>
+          </div>
+
+          {/* Reimbursed travel: per-job cap, headroom and warnings */}
+          <div>
+            <Label className="text-xs">Travel cap (£)</Label>
+            <p className="text-xs text-slate-400 mb-1">The most this client reimburses for travel on this job. Leave blank if none agreed.</p>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-slate-500">£</span>
+              <Input
+                type="number" min="0" step="0.01"
+                value={travelCap}
+                onChange={e => { capEdited.current = true; setTravelCap(e.target.value) }}
+                placeholder="0.00"
+                className="w-28"
+              />
+            </div>
+            {reimb.flagged > 0 && (
+              <p className="text-xs text-slate-600 mt-1.5" data-testid="reimb-summary">
+                Reimbursed by client: <strong>{formatCurrency(reimb.flagged)}</strong>
+                {reimb.cap !== null
+                  ? <> of {formatCurrency(reimb.cap)} cap — {formatCurrency(reimb.headroom ?? 0)} headroom</>
+                  : <> — no cap set, billed in full</>}
+              </p>
+            )}
+            {reimb.excess > 0 && reimb.cap !== null && (
+              <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 mt-1.5" data-testid="reimb-over-cap">
+                Reimbursed items ({formatCurrency(reimb.flagged)}) exceed the {formatCurrency(reimb.cap)} cap.{' '}
+                {formatCurrency(reimb.excess)} is not reimbursable — the invoice will bill {formatCurrency(reimb.billable)}
+                {' '}and the rest stays an ordinary travel expense.
+              </p>
+            )}
+            {mileageAndReimbursed && (
+              <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 mt-1.5" data-testid="reimb-mileage-warning">
+                This entry has both mileage and reimbursed travel. Claim a journey as mileage <em>or</em> as actual cost, not both.
+              </p>
+            )}
           </div>
         </CardContent>
       </Card>

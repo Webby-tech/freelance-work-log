@@ -1,8 +1,12 @@
 import type { WorkEntry } from './db/schema'
+import type { EntryReimbursement } from './reimbursement'
+import { roundMoney } from './reimbursement'
 
 export function calculateInvoiceTotals(
   entries: WorkEntry[],
-  commissionRate = 0.125
+  commissionRate = 0.125,
+  // Per-entry reimbursed travel, keyed by entry id. Omit for entries that don't use it.
+  reimbursement: Record<string, Pick<EntryReimbursement, 'flagged' | 'billable'>> = {}
 ) {
   const grossFees      = entries.reduce((sum, e) => sum + Number(e.flatFee), 0)
   const exemptAmount   = entries.reduce((sum, e) => sum + Number(e.commissionExemptAmount ?? 0), 0)
@@ -13,8 +17,25 @@ export function calculateInvoiceTotals(
   const travelExpenses = entries.reduce((sum, e) => sum + Number(e.travelExpenses ?? 0), 0)
   const subtotal       = grossFees + mileageClaim + travelExpenses
   // Commission applies to commissionable fees only (gross fees minus any exempt amounts)
+  // — never to reimbursed travel, which is not part of grossFees.
   const commission     = commissionable * commissionRate
-  return { grossFees, exemptAmount, commissionable, mileageClaim, travelExpenses, subtotal, commission }
+
+  // Reimbursed travel: billed to the client at cost (capped), on top of the fees.
+  const reimbursedTravel = roundMoney(
+    entries.reduce((sum, e) => sum + (reimbursement[e.id]?.billable ?? 0), 0)
+  )
+  // Ordinary travel shown on client invoices (unchanged legacy behaviour). Entries using
+  // reimbursement are excluded: their unreimbursed/excess items are the actor's own cost.
+  const otherTravel = entries.reduce(
+    (sum, e) => sum + ((reimbursement[e.id]?.flagged ?? 0) > 0 ? 0 : Number(e.travelExpenses ?? 0)), 0
+  )
+  // What a standard client is billed: fees plus reimbursed travel at cost.
+  const clientTotal = roundMoney(grossFees + reimbursedTravel)
+
+  return {
+    grossFees, exemptAmount, commissionable, mileageClaim, travelExpenses, subtotal, commission,
+    reimbursedTravel, otherTravel, clientTotal,
+  }
 }
 
 // Derives a short tax-year code from a period_start date string (YYYY-MM-DD).

@@ -1,6 +1,8 @@
 export const dynamic = 'force-dynamic'
 import Link from 'next/link'
 import { getEntries, getUninvoicedSummary, getYtdMiles } from '@/lib/db/queries/entries'
+import { getReimbursementByEntry } from '@/lib/db/queries/travel-expenses'
+import { roundMoney } from '@/lib/reimbursement'
 import { getSettings } from '@/lib/db/queries/settings'
 import { getYtdExpenses, getYtdExpensesTotal, getRecentUniqueExpenses } from '@/lib/db/queries/expenses'
 import { estimateTax } from '@/lib/tax-estimate'
@@ -26,6 +28,8 @@ export default async function DashboardPage() {
 
   const taxYear = getCurrentTaxYear()
   const standardRate = getStandardMileageRateForTaxYear(taxYear)
+  // Reimbursed travel is a pass-through: neither income nor an expense in the estimate.
+  const reimbursement = await getReimbursementByEntry(entries.map(e => e.id))
 
   if (!settings) {
     return (
@@ -46,6 +50,7 @@ export default async function DashboardPage() {
   let ytdMileageClaim     = 0
   let ytdTravelExpenses   = 0
   let ytdAgentCommission  = 0
+  let ytdReimbursedTravel = 0
   let runningMiles        = 0
 
   // Monthly breakdown
@@ -54,7 +59,12 @@ export default async function DashboardPage() {
   for (const e of entries) {
     const fee   = Number(e.flatFee)
     const miles = e.returnMiles ?? 0
-    const tavel = Number(e.travelExpenses ?? 0)
+    // Travel that counts as an expense = all travel minus the part reimbursed by the client
+    const reimbursed = reimbursement[e.id]?.billable ?? 0
+    const tavel = reimbursed > 0
+      ? roundMoney(Number(e.travelExpenses ?? 0) - reimbursed)
+      : Number(e.travelExpenses ?? 0)
+    ytdReimbursedTravel += reimbursed
 
     // HMRC mileage rate with 10k threshold
     const rate = runningMiles >= MILEAGE_THRESHOLD ? MILEAGE_RATE_REDUCED : standardRate
@@ -134,7 +144,11 @@ export default async function DashboardPage() {
           value={formatCurrency(ytdMileageClaim)}
           sub={uninvoiced.totalMileage > 0 ? `Includes ${formatCurrency(uninvoiced.totalMileage)} not yet recorded` : undefined}
         />
-        <SummaryTile label="Travel expenses" value={formatCurrency(ytdTravelExpenses)} />
+        <SummaryTile
+          label="Travel expenses"
+          value={formatCurrency(ytdTravelExpenses)}
+          sub={ytdReimbursedTravel > 0 ? `Excludes ${formatCurrency(ytdReimbursedTravel)} reimbursed by clients` : undefined}
+        />
         <SummaryTile
           label="YTD miles"
           value={`${ytdMiles} mi`}

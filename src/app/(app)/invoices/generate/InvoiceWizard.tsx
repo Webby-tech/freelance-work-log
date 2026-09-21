@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import type { Client, Agent, UserSettings, WorkEntry } from '@/lib/db/schema'
 import { createInvoiceAction } from '@/actions/invoice.actions'
 import { calculateInvoiceTotals } from '@/lib/invoicing'
+import type { EntryReimbursement } from '@/lib/reimbursement'
 import { formatCurrency, formatDate, formatDateRange } from '@/lib/utils'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -15,6 +16,8 @@ import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 
 type ClientWithAgent = Client & { agent: Agent | null }
+// Entries from /api/entries; `reimbursement` is only present when the entry uses reimbursed travel.
+type InvoiceEntry = WorkEntry & { reimbursement?: EntryReimbursement }
 
 interface Props {
   clients: ClientWithAgent[]
@@ -27,7 +30,7 @@ export function InvoiceWizard({ clients, settings }: Props) {
   const [clientId,      setClientId]      = useState('')
   const [startDate,     setStartDate]     = useState('')
   const [endDate,       setEndDate]       = useState('')
-  const [entries,       setEntries]       = useState<WorkEntry[]>([])
+  const [entries,       setEntries]       = useState<InvoiceEntry[]>([])
   const [selectedIds,   setSelectedIds]   = useState<Set<string>>(new Set())
   const [dueDate,       setDueDate]       = useState('')
   const [notes,         setNotes]         = useState('')
@@ -41,8 +44,11 @@ export function InvoiceWizard({ clients, settings }: Props) {
     ? Number(selectedClient.agent.commissionRate ?? 0.125)
     : 0.125
 
+  const reimbursementByEntry = Object.fromEntries(
+    selectedEntries.filter(e => e.reimbursement).map(e => [e.id, e.reimbursement!])
+  )
   const totals = selectedEntries.length > 0
-    ? calculateInvoiceTotals(selectedEntries as WorkEntry[], commissionRate)
+    ? calculateInvoiceTotals(selectedEntries, commissionRate, reimbursementByEntry)
     : null
 
   // Step 1 → fetch entries
@@ -54,7 +60,7 @@ export function InvoiceWizard({ clients, settings }: Props) {
       const res = await fetch(`/api/entries?${params}`)
       const data = await res.json()
       setEntries(data)
-      setSelectedIds(new Set(data.map((e: WorkEntry) => e.id)))
+      setSelectedIds(new Set(data.map((e: InvoiceEntry) => e.id)))
       setStep(2)
     } catch {
       toast.error('Failed to load entries')
@@ -77,8 +83,8 @@ export function InvoiceWizard({ clients, settings }: Props) {
     try {
       const isPayroll = selectedClient.type === 'payroll'
       const type      = isPayroll ? 'agent_commission' : 'client'
-      // Client invoices show fees only (mileage tracked internally for HMRC)
-      const invoiceTotal = isPayroll ? totals!.commission : totals!.grossFees
+      // Client invoices bill fees plus any reimbursed travel at cost (mileage tracked internally for HMRC)
+      const invoiceTotal = isPayroll ? totals!.commission : totals!.clientTotal
 
       const entryDates    = selectedEntries.map(e => e.date).sort()
       const entryEndDates = selectedEntries.map(e => e.endDate ?? e.date).sort()
@@ -199,7 +205,8 @@ export function InvoiceWizard({ clients, settings }: Props) {
                         <span className="text-slate-600 ml-2 text-xs">
                           {formatCurrency(Number(e.flatFee))}
                           {e.returnMiles ? ` + ${e.returnMiles} mi` : ''}
-                          {Number(e.travelExpenses) > 0 ? ` + travel ${formatCurrency(Number(e.travelExpenses))}` : ''}
+                          {!e.reimbursement && Number(e.travelExpenses) > 0 ? ` + travel ${formatCurrency(Number(e.travelExpenses))}` : ''}
+                          {e.reimbursement && e.reimbursement.billable > 0 ? ` + travel at cost ${formatCurrency(e.reimbursement.billable)}` : ''}
                         </span>
                       </label>
                     </div>
@@ -273,10 +280,16 @@ export function InvoiceWizard({ clients, settings }: Props) {
                 )}
                 {selectedClient.type === 'standard' && (
                   <>
-                    {totals.travelExpenses > 0 && (
-                      <Row label="Travel expenses" value={formatCurrency(totals.travelExpenses)} />
+                    {totals.otherTravel > 0 && (
+                      <Row label="Travel expenses" value={formatCurrency(totals.otherTravel)} />
                     )}
-                    <Row label="Total" value={formatCurrency(totals.grossFees + totals.travelExpenses)} bold />
+                    {totals.reimbursedTravel > 0 && (
+                      <Row label="Travel (at cost)" value={formatCurrency(totals.reimbursedTravel)} />
+                    )}
+                    <Row label="Total" value={formatCurrency(totals.grossFees + totals.otherTravel + totals.reimbursedTravel)} bold />
+                    {totals.reimbursedTravel > 0 && (
+                      <p className="text-xs text-slate-400 text-right">of which fees: {formatCurrency(totals.grossFees)}</p>
+                    )}
                   </>
                 )}
               </div>
@@ -320,8 +333,11 @@ export function InvoiceWizard({ clients, settings }: Props) {
               )}
               <p className="font-semibold text-base mt-2">
                 {selectedClient.type === 'payroll' ? 'Commission due: ' : 'Invoice total: '}
-                {formatCurrency(selectedClient.type === 'payroll' ? totals.commission : totals.grossFees)}
+                {formatCurrency(selectedClient.type === 'payroll' ? totals.commission : totals.clientTotal)}
               </p>
+              {selectedClient.type === 'standard' && totals.reimbursedTravel > 0 && (
+                <p className="text-xs text-slate-500">of which fees: {formatCurrency(totals.grossFees)} · travel at cost: {formatCurrency(totals.reimbursedTravel)}</p>
+              )}
               <p className="text-xs text-slate-400">You can mark it as sent / paid / void it from the Invoices list.</p>
             </CardContent>
           </Card>

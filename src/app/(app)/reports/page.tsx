@@ -5,6 +5,7 @@ import { getCurrentTaxYear, getTaxYearForDate, formatTaxYearDates, getStandardMi
 import { getReportData } from '@/lib/db/queries/reports'
 import { getSettings } from '@/lib/db/queries/settings'
 import { estimateTax } from '@/lib/tax-estimate'
+import { calculateReimbursement, roundMoney } from '@/lib/reimbursement'
 import { formatCurrency } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { ReportPDFButton } from './ReportPDFButton'
@@ -39,16 +40,27 @@ export default async function ReportsPage({
   let grossFees      = 0
   let mileageClaim   = 0
   let travelExpenses = 0
+  let reimbursedExpenses = 0
   let runningMiles   = 0
 
   const monthMap      = new Map<string, MonthRow>()
   const clientMap     = new Map<string, ClientRow>()
   const entryMileage  = new Map<string, { miles: number; value: number; rate: number }>()
+  const entryReimbursed = new Map<string, number>()
 
   for (const e of entries) {
     const fee   = Number(e.flatFee)
     const miles = e.returnMiles ?? 0
-    const trav  = Number(e.travelExpenses ?? 0)
+    // Travel that counts as an expense = all travel minus the part reimbursed by the client
+    // (a pass-through: income and expense cancel, so it's excluded from both).
+    const reimb = calculateReimbursement(e.travelItems, e.travelReimbursementCap)
+    const trav  = reimb.billable > 0
+      ? roundMoney(Number(e.travelExpenses ?? 0) - reimb.billable)
+      : Number(e.travelExpenses ?? 0)
+    if (reimb.billable > 0) {
+      reimbursedExpenses += reimb.billable
+      entryReimbursed.set(e.id, reimb.billable)
+    }
 
     // Mileage value with 10k threshold
     const standardMiles = Math.min(miles, Math.max(0, MILEAGE_THRESHOLD - runningMiles))
@@ -110,6 +122,7 @@ export default async function ReportsPage({
     mileageClaim,
     totalReturnMiles: runningMiles,
     travelExpenses,
+    reimbursedExpenses,
     agentCommission,
     generalExpenses,
     totalAllowableExpenses,
@@ -210,6 +223,18 @@ export default async function ReportsPage({
             <p className="px-5 pb-4 text-xs text-slate-400 italic">
               Personal allowance used by pension income — acting income taxable from £1. No NI (age 67).
             </p>
+            {reimbursedExpenses > 0 && (
+              <div className="border-t bg-slate-50 px-5 py-3 space-y-1" data-testid="reimbursed-summary">
+                <p className="text-xs font-semibold text-slate-600">Reimbursed expenses (billed to clients at cost)</p>
+                <SummaryRow label="Reimbursed expenses" value={formatCurrency(reimbursedExpenses)} bold />
+                <SummaryRow label="Turnover for Self Assessment (fees + reimbursed)" value={formatCurrency(grossFees + reimbursedExpenses)} />
+                <SummaryRow label="Expenses for Self Assessment (allowable + reimbursed)" value={formatCurrency(totalAllowableExpenses + reimbursedExpenses)} />
+                <p className="text-xs text-slate-400 italic pt-1">
+                  Reimbursed travel is income and an expense that cancel out, so it is excluded from taxable profit above.
+                  A Self Assessment return normally reports both figures gross — confirm the treatment with your accountant before filing.
+                </p>
+              </div>
+            )}
           </section>
 
           {/* ── Monthly breakdown ── */}
@@ -369,7 +394,7 @@ export default async function ReportsPage({
                       key: `${e.id}-t${idx}`,
                       date: firstRow && idx === 0 ? dateStr : '',
                       job:  firstRow && idx === 0 ? job : '',
-                      description: item.description,
+                      description: item.reimbursed ? `${item.description} (reimbursed by client)` : item.description,
                       amount: Number(item.amount),
                     })
                     firstRow = false
@@ -381,6 +406,17 @@ export default async function ReportsPage({
                     job:  firstRow ? job : '',
                     description: 'Travel expenses',
                     amount: Number(e.travelExpenses),
+                  })
+                }
+                // Pass-through: taken back out so the table reconciles to the allowable travel total
+                const passThrough = entryReimbursed.get(e.id)
+                if (passThrough) {
+                  travelRows.push({
+                    key: `${e.id}-reimbursed`,
+                    date: '',
+                    job: '',
+                    description: 'Less: reimbursed by client (excluded)',
+                    amount: -passThrough,
                   })
                 }
               }
