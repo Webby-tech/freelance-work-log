@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 import Link from 'next/link'
 import { getEntries, getUninvoicedSummary, getYtdMiles } from '@/lib/db/queries/entries'
 import { getReimbursementByEntry } from '@/lib/db/queries/travel-expenses'
+import { getReceiptsForParents } from '@/lib/db/queries/receipts'
 import { roundMoney } from '@/lib/reimbursement'
 import { getSettings } from '@/lib/db/queries/settings'
 import { getYtdExpenses, getYtdExpensesTotal, getRecentUniqueExpenses } from '@/lib/db/queries/expenses'
@@ -30,6 +31,7 @@ export default async function DashboardPage() {
   const standardRate = getStandardMileageRateForTaxYear(taxYear)
   // Reimbursed travel is a pass-through: neither income nor an expense in the estimate.
   const reimbursement = await getReimbursementByEntry(entries.map(e => e.id))
+  const expenseReceipts = await getReceiptsForParents('professional_expense', ytdExpensesList.map(e => e.id))
 
   if (!settings) {
     return (
@@ -172,7 +174,7 @@ export default async function DashboardPage() {
       />
 
       {/* General expenses */}
-      <ExpenseCard expenses={ytdExpensesList} ytdTotal={ytdExpensesTotal} recentItems={recentExpenses} />
+      <ExpenseCard expenses={ytdExpensesList} ytdTotal={ytdExpensesTotal} recentItems={recentExpenses} receipts={expenseReceipts} />
 
       {/* Monthly breakdown */}
       {months.length > 0 && (

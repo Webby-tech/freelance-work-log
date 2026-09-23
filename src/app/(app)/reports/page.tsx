@@ -6,6 +6,7 @@ import { getReportData } from '@/lib/db/queries/reports'
 import { getSettings } from '@/lib/db/queries/settings'
 import { estimateTax } from '@/lib/tax-estimate'
 import { calculateReimbursement, roundMoney } from '@/lib/reimbursement'
+import { getExpenseLedger, summariseCoverage } from '@/lib/db/queries/receipts'
 import { formatCurrency } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { ReportPDFButton } from './ReportPDFButton'
@@ -35,6 +36,10 @@ export default async function ReportsPage({
   const end   = activeTY.end.toISOString().split('T')[0]
 
   const { entries, invoices, expenses } = await getReportData(start, end)
+  // Evidence check: how many claimed expenses (professional + travel items) have a receipt
+  const receiptCoverage = summariseCoverage(await getExpenseLedger(start, end))
+  const receiptsTotal = receiptCoverage.professional.total + receiptCoverage.travel.total
+  const receiptsMissing = receiptsTotal - receiptCoverage.professional.withReceipts - receiptCoverage.travel.withReceipts
 
   // ── Compute summary ───────────────────────────────────────────────────────
   let grossFees      = 0
@@ -123,6 +128,7 @@ export default async function ReportsPage({
     totalReturnMiles: runningMiles,
     travelExpenses,
     reimbursedExpenses,
+    receiptCoverage,
     agentCommission,
     generalExpenses,
     totalAllowableExpenses,
@@ -236,6 +242,37 @@ export default async function ReportsPage({
               </div>
             )}
           </section>
+
+          {/* ── Receipts (evidence for expenses) ── */}
+          {receiptsTotal > 0 && (
+            <section className="rounded-lg border bg-white overflow-hidden" data-testid="receipt-summary">
+              <div className="px-5 py-3 bg-slate-50 border-b">
+                <h2 className="text-sm font-semibold text-slate-700">Receipts for expenses</h2>
+              </div>
+              <div className="divide-y">
+                <SummaryRow
+                  label="Professional expenses"
+                  value={`${receiptCoverage.professional.withReceipts} with · ${receiptCoverage.professional.total - receiptCoverage.professional.withReceipts} without`}
+                />
+                <SummaryRow
+                  label="Travel expenses"
+                  value={`${receiptCoverage.travel.withReceipts} with · ${receiptCoverage.travel.total - receiptCoverage.travel.withReceipts} without`}
+                />
+                <div className="px-5 py-3 flex items-center justify-between">
+                  <span className={`text-sm font-semibold ${receiptsMissing > 0 ? 'text-amber-700' : 'text-green-700'}`}>
+                    {receiptsMissing > 0
+                      ? `${receiptsMissing} of ${receiptsTotal} expenses have no receipt`
+                      : `All ${receiptsTotal} expenses have a receipt`}
+                  </span>
+                  {receiptsMissing > 0 && (
+                    <Link href={`/receipts?year=${encodeURIComponent(activeTY.label)}&filter=missing`} className="text-xs text-blue-600 hover:underline">
+                      Find missing receipts →
+                    </Link>
+                  )}
+                </div>
+              </div>
+            </section>
+          )}
 
           {/* ── Monthly breakdown ── */}
           <section>

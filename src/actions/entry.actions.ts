@@ -5,7 +5,8 @@ import { replaceTravelExpenseItems } from '@/lib/db/queries/travel-expenses'
 import { parseCap } from '@/lib/reimbursement'
 import type { NewWorkEntry, WorkEntry } from '@/lib/db/schema'
 
-export type TravelItem = { description: string; amount: string; reimbursed?: boolean }
+// `id` is set for items that already exist, so saving keeps their receipts attached.
+export type TravelItem = { id?: string; description: string; amount: string; reimbursed?: boolean }
 
 // Empty / invalid / negative cap → null (no cap). Otherwise stored as a 2dp string.
 function normaliseCap(cap: string | null | undefined): string | null {
@@ -52,9 +53,18 @@ export async function updateEntryAction(
   return entry
 }
 
-export async function deleteEntryAction(id: string) {
-  await deleteEntry(id)
-  revalidatePath('/log')
-  revalidatePath('/reports')
-  revalidatePath('/')
+// Deletes the entry and any receipts attached to its travel items (files included).
+export async function deleteEntryAction(
+  id: string
+): Promise<{ ok: true; deletedReceipts: number } | { ok: false; error: string }> {
+  try {
+    const deletedReceipts = await deleteEntry(id)
+    revalidatePath('/log')
+    revalidatePath('/reports')
+    revalidatePath('/receipts')
+    revalidatePath('/')
+    return { ok: true, deletedReceipts }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
 }

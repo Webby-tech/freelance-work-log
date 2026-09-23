@@ -1,3 +1,14 @@
+// Receipt uploads go from the browser straight to Vercel Blob (https://vercel.com/api/blob),
+// so connect-src must allow it. NEXT_PUBLIC_VERCEL_BLOB_API_URL is only ever set for local
+// testing against a stand-in server; it is unset in production.
+const blobApiOrigin = (() => {
+  try {
+    return process.env.NEXT_PUBLIC_VERCEL_BLOB_API_URL ? new URL(process.env.NEXT_PUBLIC_VERCEL_BLOB_API_URL).origin : ''
+  } catch {
+    return ''
+  }
+})()
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   transpilePackages: ['@react-pdf/renderer'],
@@ -24,7 +35,8 @@ const nextConfig = {
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: blob:",
               "font-src 'self' data:",
-              "connect-src 'self' https://api.postcodes.io https://nominatim.openstreetmap.org https://router.project-osrm.org",
+              ["connect-src 'self' https://api.postcodes.io https://nominatim.openstreetmap.org https://router.project-osrm.org",
+                'https://vercel.com https://*.blob.vercel-storage.com', blobApiOrigin].filter(Boolean).join(' '),
               "worker-src 'self' blob:",
             ].join('; '),
           },

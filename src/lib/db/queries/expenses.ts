@@ -1,8 +1,10 @@
 import { and, desc, eq, gte, lte } from 'drizzle-orm'
 import { db } from '../index'
-import { expenses } from '../schema'
+import { expenses, receipts } from '../schema'
 import type { Expense, NewExpense } from '../schema'
 import { getCurrentTaxYear } from '../../tax-year'
+import { deleteStoredFiles } from '../../receipt-storage'
+import { getReceiptRowsForParents } from './receipts'
 
 export interface RecentExpenseItem {
   description: string
@@ -64,6 +66,14 @@ export async function createExpense(
   return expense
 }
 
-export async function deleteExpense(id: string): Promise<void> {
-  await db.delete(expenses).where(eq(expenses.id, id))
+// Deletes the expense AND its receipts (file first, so a storage failure leaves everything
+// intact rather than orphaning a file). Returns how many receipts were deleted with it.
+export async function deleteExpense(id: string): Promise<number> {
+  const files = await getReceiptRowsForParents('professional_expense', [id])
+  await deleteStoredFiles(files.map(f => f.storageKey))
+  await db.transaction(async (tx) => {
+    await tx.delete(receipts).where(and(eq(receipts.parentType, 'professional_expense'), eq(receipts.parentId, id)))
+    await tx.delete(expenses).where(eq(expenses.id, id))
+  })
+  return files.length
 }

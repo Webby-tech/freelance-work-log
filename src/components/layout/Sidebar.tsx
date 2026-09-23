@@ -8,6 +8,7 @@ import {
   FileText,
   Users,
   BarChart2,
+  Receipt,
   Settings,
 } from 'lucide-react'
 
@@ -16,6 +17,7 @@ const nav = [
   { href: '/log',       label: 'Work Log',   icon: BookOpen },
   { href: '/invoices',  label: 'Invoices',   icon: FileText },
   { href: '/clients',   label: 'Clients',    icon: Users },
+  { href: '/receipts',  label: 'Receipts',   icon: Receipt },
   { href: '/reports',   label: 'Reports',    icon: BarChart2 },
   { href: '/settings',  label: 'Settings',   icon: Settings },
 ]

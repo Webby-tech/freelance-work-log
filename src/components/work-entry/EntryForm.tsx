@@ -13,6 +13,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { ReceiptAttachments } from '@/components/receipts/ReceiptAttachments'
+import type { ReceiptView } from '@/lib/db/queries/receipts'
 import { Textarea } from '@/components/ui/textarea'
 import { Separator } from '@/components/ui/separator'
 import { Search, Loader2, Plus, Trash2 } from 'lucide-react'
@@ -22,6 +24,7 @@ interface Props {
   settings: UserSettings
   existing?: WorkEntry
   existingTravelItems?: TravelItem[]
+  itemReceipts?: Record<string, ReceiptView[]>   // receipts by saved travel item id
 }
 
 interface MileageData {
@@ -50,7 +53,7 @@ interface SearchResult {
   postcode: string | null
 }
 
-export function EntryForm({ clients, settings, existing, existingTravelItems }: Props) {
+export function EntryForm({ clients, settings, existing, existingTravelItems, itemReceipts = {} }: Props) {
   const router = useRouter()
   const [saving, setSaving] = useState(false)
 
@@ -393,7 +396,13 @@ export function EntryForm({ clients, settings, existing, existingTravelItems }: 
                     <Button
                       type="button" variant="ghost" size="icon"
                       className="h-8 w-8 text-red-400 hover:text-red-600 shrink-0"
-                      onClick={() => setTravelItems(prev => prev.filter((_, i) => i !== idx))}
+                      onClick={() => {
+                        const n = item.id ? (itemReceipts[item.id]?.length ?? 0) : 0
+                        if (n > 0 && !confirm(
+                          `Remove "${item.description || 'this expense'}"?\n\nIts ${n} attached receipt${n === 1 ? '' : 's'} will be permanently deleted when you save the entry.`
+                        )) return
+                        setTravelItems(prev => prev.filter((_, i) => i !== idx))
+                      }}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
@@ -405,6 +414,13 @@ export function EntryForm({ clients, settings, existing, existingTravelItems }: 
                     />
                     Reimbursed by client
                   </label>
+                  <div className="pl-1">
+                    {item.id ? (
+                      <ReceiptAttachments parentType="travel_expense_item" parentId={item.id} receipts={itemReceipts[item.id] ?? []} />
+                    ) : (
+                      <p className="text-xs text-slate-400">Save the entry first, then you can attach a receipt to this expense.</p>
+                    )}
+                  </div>
                 </div>
               ))}
               <Button

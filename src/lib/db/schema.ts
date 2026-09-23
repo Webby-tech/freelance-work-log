@@ -7,6 +7,9 @@ import {
   date,
   timestamp,
   integer,
+  index,
+  uniqueIndex,
+  check,
 } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
 import { sql } from 'drizzle-orm'
@@ -122,6 +125,28 @@ export const expenses = pgTable('expenses', {
   updatedAt:   timestamp('updated_at', { withTimezone: true }).default(sql`now()`),
 })
 
+// ─── Receipts ─────────────────────────────────────────────────────────────────
+// Evidence for expenditure. The file itself lives in private object storage (Vercel
+// Blob); only its key and metadata are stored here. parent_id is polymorphic (no FK),
+// so deleting a parent must delete its receipts explicitly.
+
+export type ReceiptParentType = 'professional_expense' | 'travel_expense_item'
+
+export const receipts = pgTable('receipts', {
+  id:               uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  parentType:       text('parent_type').notNull().$type<ReceiptParentType>(),
+  parentId:         uuid('parent_id').notNull(),
+  storageKey:       text('storage_key').notNull(),   // key/path in file storage — never a URL
+  originalFilename: text('original_filename').notNull(),
+  mimeType:         text('mime_type').notNull(),
+  sizeBytes:        integer('size_bytes').notNull(),
+  uploadedAt:       timestamp('uploaded_at', { withTimezone: true }).notNull().default(sql`now()`),
+}, t => [
+  index('receipts_parent_idx').on(t.parentType, t.parentId),
+  uniqueIndex('receipts_storage_key_key').on(t.storageKey),
+  check('receipts_parent_type_check', sql`${t.parentType} in ('professional_expense', 'travel_expense_item')`),
+])
+
 // ─── User Settings ────────────────────────────────────────────────────────────
 
 export const userSettings = pgTable('user_settings', {
@@ -203,6 +228,9 @@ export type NewUserSettings = typeof userSettings.$inferInsert
 
 export type TravelExpenseItem    = typeof travelExpenseItems.$inferSelect
 export type NewTravelExpenseItem = typeof travelExpenseItems.$inferInsert
+
+export type Receipt    = typeof receipts.$inferSelect
+export type NewReceipt = typeof receipts.$inferInsert
 
 export type ClientWithAgent = Client & { agent: Agent | null }
 export type WorkEntryWithClient = WorkEntry & { client: Client }

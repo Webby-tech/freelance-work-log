@@ -9,8 +9,12 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Plus, Trash2, ChevronDown, ChevronUp } from 'lucide-react'
+import Link from 'next/link'
+import { ReceiptAttachments } from '@/components/receipts/ReceiptAttachments'
+import { ReceiptBadge } from '@/components/receipts/ReceiptBadge'
 import type { Expense } from '@/lib/db/schema'
 import type { RecentExpenseItem } from '@/lib/db/queries/expenses'
+import type { ReceiptView } from '@/lib/db/queries/receipts'
 
 const ALL_CATEGORIES = [
   'Professional fees',
@@ -27,12 +31,15 @@ interface Props {
   expenses:    Expense[]
   ytdTotal:    number
   recentItems: RecentExpenseItem[]
+  receipts:    Record<string, ReceiptView[]>   // by expense id
 }
 
-export function ExpenseCard({ expenses, ytdTotal, recentItems }: Props) {
+export function ExpenseCard({ expenses, ytdTotal, recentItems, receipts }: Props) {
   const router = useRouter()
 
   const [showAll,     setShowAll]    = useState(false)
+  const [onlyMissing, setOnlyMissing] = useState(false)
+  const [openId,      setOpenId]     = useState<string | null>(null)
   const [date,        setDate]       = useState(new Date().toISOString().split('T')[0])
   const [description, setDesc]       = useState('')
   const [category,    setCategory]   = useState(ALL_CATEGORIES[0])
@@ -68,11 +75,23 @@ export function ExpenseCard({ expenses, ytdTotal, recentItems }: Props) {
     }
   }
 
-  async function handleDelete(id: string) {
-    setDeleting(id)
+  async function handleDelete(e: Expense) {
+    const n = receipts[e.id]?.length ?? 0
+    const what = `"${e.description}" (${formatCurrency(Number(e.amount))} on ${formatDate(e.date)})`
+    const warning = n > 0
+      ? `\n\nThis will also permanently delete its ${n} attached receipt${n === 1 ? '' : 's'}.`
+      : ''
+    if (!confirm(`Delete expense ${what}?${warning}`)) return
+    setDeleting(e.id)
     try {
-      await deleteExpenseAction(id)
-      toast.success('Expense deleted')
+      const res = await deleteExpenseAction(e.id)
+      if (!res.ok) {
+        toast.error(res.error)
+        return
+      }
+      toast.success(res.deletedReceipts > 0
+        ? `Expense and ${res.deletedReceipts} receipt${res.deletedReceipts === 1 ? '' : 's'} deleted`
+        : 'Expense deleted')
       router.refresh()
     } catch {
       toast.error('Failed to delete expense')
@@ -80,6 +99,9 @@ export function ExpenseCard({ expenses, ytdTotal, recentItems }: Props) {
       setDeleting(null)
     }
   }
+
+  const missingCount = expenses.filter(e => !(receipts[e.id]?.length)).length
+  const visible = onlyMissing ? expenses.filter(e => !(receipts[e.id]?.length)) : expenses
 
   return (
     <Card>
@@ -94,32 +116,65 @@ export function ExpenseCard({ expenses, ytdTotal, recentItems }: Props) {
         {/* Logged expenses list */}
         {expenses.length > 0 && (
           <div className="space-y-1">
-            {expenses.slice(0, showAll ? undefined : 3).map(e => (
-              <div key={e.id} className="flex items-center justify-between text-xs text-slate-600">
-                <span className="truncate flex-1 mr-2">
-                  <span className="text-slate-400">{formatDate(e.date)}</span>
-                  {' '}{e.description}
-                  <span className="text-slate-400 ml-1">· {e.category}</span>
-                </span>
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className="font-medium">{formatCurrency(Number(e.amount))}</span>
-                  <button
-                    onClick={() => handleDelete(e.id)}
-                    disabled={deleting === e.id}
-                    className="text-red-400 hover:text-red-600 disabled:opacity-40"
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </button>
+            <div className="flex items-center justify-between pb-1 text-xs">
+              <button
+                type="button"
+                onClick={() => { setOnlyMissing(m => !m); setShowAll(true) }}
+                className={`rounded px-2 py-1 ${onlyMissing ? 'bg-amber-100 text-amber-800' : 'text-slate-500 hover:bg-slate-100'}`}
+                aria-pressed={onlyMissing}
+              >
+                Missing receipts ({missingCount})
+              </button>
+              <Link href="/receipts" className="text-slate-400 hover:text-slate-600">All receipts →</Link>
+            </div>
+            {onlyMissing && visible.length === 0 && (
+              <p className="text-xs text-green-700">Every expense this year has a receipt attached.</p>
+            )}
+            {visible.slice(0, showAll ? undefined : 3).map(e => {
+              const list = receipts[e.id] ?? []
+              return (
+                <div key={e.id}>
+                  <div className="flex items-center justify-between text-xs text-slate-600">
+                    <span className="truncate flex-1 mr-2">
+                      <span className="text-slate-400">{formatDate(e.date)}</span>
+                      {' '}{e.description}
+                      <span className="text-slate-400 ml-1">· {e.category}</span>
+                    </span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setOpenId(id => (id === e.id ? null : e.id))}
+                        aria-expanded={openId === e.id}
+                        aria-label={`Receipts for ${e.description}`}
+                      >
+                        <ReceiptBadge count={list.length} />
+                      </button>
+                      <span className="font-medium">{formatCurrency(Number(e.amount))}</span>
+                      <button
+                        onClick={() => handleDelete(e)}
+                        disabled={deleting === e.id}
+                        className="text-red-400 hover:text-red-600 disabled:opacity-40"
+                        aria-label={`Delete ${e.description}`}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                  </div>
+                  {openId === e.id && (
+                    <div className="mt-1.5 mb-2 rounded-md bg-slate-50 p-2">
+                      <ReceiptAttachments parentType="professional_expense" parentId={e.id} receipts={list} />
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
-            {expenses.length > 3 && (
+              )
+            })}
+            {visible.length > 3 && (
               <button
                 onClick={() => setShowAll(s => !s)}
                 className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600 mt-1"
               >
                 {showAll ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                {showAll ? 'Show less' : `Show ${expenses.length - 3} more`}
+                {showAll ? 'Show less' : `Show ${visible.length - 3} more`}
               </button>
             )}
           </div>

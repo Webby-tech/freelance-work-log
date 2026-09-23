@@ -8,6 +8,8 @@ import type { WorkEntryWithClient } from '@/lib/db/queries/entries'
 import { deleteEntryAction } from '@/actions/entry.actions'
 import { formatCurrency, formatDateRange } from '@/lib/utils'
 import { parseCap, claimsMileageAndReimbursedTravel, type EntryReimbursement } from '@/lib/reimbursement'
+import type { TravelReceiptStatus } from '@/lib/db/queries/receipts'
+import { Paperclip } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Pencil, Trash2, MapPin } from 'lucide-react'
@@ -19,9 +21,11 @@ interface Props {
   selectedYear: string
   // Only entries that use reimbursed travel appear here
   reimbursement?: Record<string, EntryReimbursement>
+  // Only entries that have travel expense items appear here
+  receiptStatus?: Record<string, TravelReceiptStatus>
 }
 
-export function EntryTable({ entries, clients, taxYears, selectedYear, reimbursement = {} }: Props) {
+export function EntryTable({ entries, clients, taxYears, selectedYear, reimbursement = {}, receiptStatus = {} }: Props) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -34,11 +38,21 @@ export function EntryTable({ entries, clients, taxYears, selectedYear, reimburse
   }
 
   async function handleDelete(id: string, name: string) {
-    if (!confirm(`Delete entry at ${name}?`)) return
+    const n = receiptStatus[id]?.receipts ?? 0
+    const warning = n > 0
+      ? `\n\nThis will also permanently delete the ${n} receipt${n === 1 ? '' : 's'} attached to its travel expenses.`
+      : ''
+    if (!confirm(`Delete entry at ${name}?${warning}`)) return
     setDeleting(id)
     try {
-      await deleteEntryAction(id)
-      toast.success('Entry deleted')
+      const res = await deleteEntryAction(id)
+      if (!res.ok) {
+        toast.error(res.error)
+        return
+      }
+      toast.success(res.deletedReceipts > 0
+        ? `Entry and ${res.deletedReceipts} receipt${res.deletedReceipts === 1 ? '' : 's'} deleted`
+        : 'Entry deleted')
       router.refresh()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Failed to delete')
@@ -115,6 +129,7 @@ export function EntryTable({ entries, clients, taxYears, selectedYear, reimburse
             const travel    = Number(e.travelExpenses ?? 0)
             const r         = reimbursement[e.id]
             const cap       = parseCap(e.travelReimbursementCap)
+            const rs        = receiptStatus[e.id]
 
             return (
               <div
@@ -146,6 +161,17 @@ export function EntryTable({ entries, clients, taxYears, selectedYear, reimburse
                         <span>Travel {formatCurrency(travel)}</span>
                       )}
                     </div>
+                    {rs && (
+                      <p
+                        className={`mt-1 flex items-center gap-1 text-xs ${rs.itemsWithReceipts === rs.items ? 'text-green-700' : 'text-amber-700'}`}
+                        data-testid="travel-receipts"
+                      >
+                        <Paperclip className="h-3 w-3" />
+                        {rs.itemsWithReceipts === rs.items
+                          ? `Receipts attached for ${rs.items === 1 ? 'the travel expense' : `all ${rs.items} travel expenses`}`
+                          : `${rs.items - rs.itemsWithReceipts} of ${rs.items} travel expense${rs.items === 1 ? '' : 's'} missing a receipt`}
+                      </p>
+                    )}
                     {(r || cap !== null) && (
                       <p className="text-xs text-slate-500 mt-1">
                         {cap !== null && <>Travel cap {formatCurrency(cap)}</>}

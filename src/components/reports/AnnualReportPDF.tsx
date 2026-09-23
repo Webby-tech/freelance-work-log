@@ -8,6 +8,7 @@ import type { Expense, UserSettings } from '@/lib/db/schema'
 import type { TaxYear } from '@/lib/tax-year'
 import { getStandardMileageRateForTaxYear, MILEAGE_RATE_REDUCED, MILEAGE_THRESHOLD } from '@/lib/tax-year'
 import { calculateReimbursement } from '@/lib/reimbursement'
+import type { ReceiptCoverage } from '@/lib/db/queries/receipts'
 
 const c = {
   black:   '#111827',
@@ -69,6 +70,7 @@ export interface ReportSummary {
   totalReturnMiles:      number
   travelExpenses:        number
   reimbursedExpenses:    number
+  receiptCoverage?:      ReceiptCoverage
   agentCommission:       number
   generalExpenses:       number
   totalAllowableExpenses: number
@@ -186,6 +188,30 @@ export function AnnualReportPDF({ taxYear, isPartial, entries, invoices, expense
             </Text>
           </View>
         )}
+
+        {/* Receipts: evidence for claimed expenses */}
+        {summary.receiptCoverage && (summary.receiptCoverage.professional.total + summary.receiptCoverage.travel.total) > 0 && (() => {
+          const c = summary.receiptCoverage!
+          const total = c.professional.total + c.travel.total
+          const missing = total - c.professional.withReceipts - c.travel.withReceipts
+          return (
+            <View style={s.section}>
+              <Text style={s.sectionHd}>Receipts for expenses</Text>
+              <View style={s.summaryRow}>
+                <Text style={s.summaryLbl}>Professional expenses</Text>
+                <Text style={s.summaryVal}>{c.professional.withReceipts} with · {c.professional.total - c.professional.withReceipts} without</Text>
+              </View>
+              <View style={s.summaryRow}>
+                <Text style={s.summaryLbl}>Travel expenses</Text>
+                <Text style={s.summaryVal}>{c.travel.withReceipts} with · {c.travel.total - c.travel.withReceipts} without</Text>
+              </View>
+              <Text style={s.taxNote}>
+                {missing > 0 ? `${missing} of ${total} expenses have no receipt attached.` : `All ${total} expenses have a receipt attached.`}
+                {' '}HMRC generally expects records to be kept for five years after the 31 January filing deadline — confirm with your accountant.
+              </Text>
+            </View>
+          )
+        })()}
 
         {/* Monthly breakdown */}
         <View style={s.section}>

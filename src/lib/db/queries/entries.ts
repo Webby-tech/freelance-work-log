@@ -1,6 +1,8 @@
-import { and, desc, eq, gte, isNotNull, isNull, lte, type SQL } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, type SQL } from 'drizzle-orm'
 import { db } from '../index'
-import { workEntries } from '../schema'
+import { receipts, travelExpenseItems, workEntries } from '../schema'
+import { deleteStoredFiles } from '../../receipt-storage'
+import { getReceiptRowsForParents } from './receipts'
 import type { WorkEntry, NewWorkEntry, Client } from '../schema'
 import { getCurrentTaxYear } from '../../tax-year'
 
@@ -68,12 +70,25 @@ export async function updateEntry(id: string, values: Partial<WorkEntry>): Promi
   return entry
 }
 
-export async function deleteEntry(id: string): Promise<void> {
+// Deletes the entry (its travel items go with it via cascade) and any receipts attached to
+// those items — file first, so a storage failure leaves everything intact.
+// Returns how many receipts were deleted with it.
+export async function deleteEntry(id: string): Promise<number> {
   const entry = await getEntry(id)
   if (entry?.invoiceId) {
     throw new Error('Cannot delete an invoiced entry. Void the invoice first.')
   }
-  await db.delete(workEntries).where(eq(workEntries.id, id))
+  const items = await db.select({ id: travelExpenseItems.id }).from(travelExpenseItems).where(eq(travelExpenseItems.workEntryId, id))
+  const itemIds = items.map(i => i.id)
+  const files = await getReceiptRowsForParents('travel_expense_item', itemIds)
+  await deleteStoredFiles(files.map(f => f.storageKey))
+  await db.transaction(async (tx) => {
+    if (itemIds.length > 0) {
+      await tx.delete(receipts).where(and(eq(receipts.parentType, 'travel_expense_item'), inArray(receipts.parentId, itemIds)))
+    }
+    await tx.delete(workEntries).where(eq(workEntries.id, id))
+  })
+  return files.length
 }
 
 export async function getYtdMiles(): Promise<number> {
