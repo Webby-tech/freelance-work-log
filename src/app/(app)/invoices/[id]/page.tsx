@@ -6,6 +6,7 @@ import { getSettings } from '@/lib/db/queries/settings'
 import { formatCurrency, formatDate, formatDateRange } from '@/lib/utils'
 import { calculateInvoiceTotals } from '@/lib/invoicing'
 import { getReimbursementByEntry } from '@/lib/db/queries/travel-expenses'
+import { getReimbursedTravelReceiptsForEntries } from '@/lib/db/queries/receipts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -40,6 +41,9 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
     : null
 
   const isPayroll = invoice.type === 'agent_commission'
+  // Agent/commission invoices never bill travel (commission is on fees only), so this is
+  // only ever non-empty for a standard client invoice.
+  const receiptsToMerge = isPayroll ? [] : await getReimbursedTravelReceiptsForEntries(invoice.entries.map(e => e.id))
 
   return (
     <div className="max-w-2xl mx-auto p-6 space-y-5">
@@ -57,7 +61,15 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
           </p>
         </div>
         <div className="flex gap-2">
-          {settings && <InvoicePDFButton invoice={invoice} settings={settings} entries={invoice.entries as WorkEntry[]} reimbursement={reimbursement} />}
+          {settings && (
+            <InvoicePDFButton
+              invoice={invoice}
+              settings={settings}
+              entries={invoice.entries as WorkEntry[]}
+              reimbursement={reimbursement}
+              receiptsToMerge={receiptsToMerge}
+            />
+          )}
           {invoice.status !== 'voided' && (
             <InvoiceStatusActions invoiceId={invoice.id} currentStatus={invoice.status} />
           )}

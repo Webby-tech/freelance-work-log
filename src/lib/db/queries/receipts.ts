@@ -71,6 +71,27 @@ export async function isParentLocked(type: ReceiptParentType, id: string): Promi
   return !!rows[0]?.invoiceId
 }
 
+// Receipts on REIMBURSED travel items belonging to the given entries — i.e. the evidence for
+// what a client is being asked to reimburse at cost on a standard invoice. Non-reimbursed
+// travel items and professional expenses are never billed to a client, so their receipts are
+// intentionally excluded: this is only for what goes on the invoice itself.
+export async function getReimbursedTravelReceiptsForEntries(entryIds: string[]): Promise<ReceiptView[]> {
+  if (entryIds.length === 0) return []
+  const rows = await db
+    .select({
+      id: receipts.id,
+      originalFilename: receipts.originalFilename,
+      mimeType: receipts.mimeType,
+      sizeBytes: receipts.sizeBytes,
+      uploadedAt: receipts.uploadedAt,
+    })
+    .from(receipts)
+    .innerJoin(travelExpenseItems, and(eq(receipts.parentType, 'travel_expense_item'), eq(receipts.parentId, travelExpenseItems.id)))
+    .where(and(eq(travelExpenseItems.reimbursed, true), inArray(travelExpenseItems.workEntryId, entryIds)))
+    .orderBy(receipts.uploadedAt)
+  return rows.map(r => ({ ...r, uploadedAt: r.uploadedAt.toISOString() }))
+}
+
 // Per work entry: how many travel items it has, how many of those have a receipt, and the
 // total number of receipts (used for the log-list indicator and delete confirmations).
 // Entries with no travel items are absent from the result.

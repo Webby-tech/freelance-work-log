@@ -35,7 +35,10 @@ const nextConfig = {
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: blob:",
               "font-src 'self' data:",
-              ["connect-src 'self' https://api.postcodes.io https://nominatim.openstreetmap.org https://router.project-osrm.org",
+              // data: is required for @react-pdf/renderer, which fetches an inlined WASM
+              // module (font shaping) as a data: URI — without it, every PDF download
+              // silently fails (the render's internal fetch is blocked, never resolves).
+              ["connect-src 'self' data: https://api.postcodes.io https://nominatim.openstreetmap.org https://router.project-osrm.org",
                 'https://vercel.com https://*.blob.vercel-storage.com', blobApiOrigin].filter(Boolean).join(' '),
               "worker-src 'self' blob:",
             ].join('; '),
